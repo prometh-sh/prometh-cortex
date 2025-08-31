@@ -1,0 +1,50 @@
+# Prometh Cortex Configuration Sample
+# Copy this file to config.toml and customize for your environment
+
+[datalake]
+# Add your document directories here - supports multiple paths
+repos = [
+    "/path/to/your/notes",
+    "/path/to/your/documents", 
+    "/path/to/your/projects"
+]
+
+[storage]
+# Directory where RAG index will be stored
+rag_index_dir = "/path/to/index/storage"
+
+[server]
+# MCP and HTTP server configuration
+port = 8080
+host = "localhost"
+auth_token = "your-secure-token-here"
+
+[embedding]
+# Embedding model and chunking configuration
+model = "sentence-transformers/all-MiniLM-L6-v2"
+max_query_results = 10
+chunk_size = 512
+chunk_overlap = 50
+
+[vector_store]
+# Vector store backend: "faiss" (local) or "qdrant" (scalable)
+type = "faiss"
+
+# Qdrant configuration (when type = "qdrant")
+[vector_store.qdrant]
+host = "localhost"
+port = 6333
+collection_name = "prometh_cortex"
+# api_key = "your-qdrant-api-key"  # For Qdrant Cloud
+# use_https = true  # For Qdrant Cloud
+
+# FAISS configuration (when type = "faiss") 
+[vector_store.faiss]
+# FAISS uses local file storage - no additional config needed
+
+[structured_query]
+# Enhanced search with metadata filtering
+core_fields = ["tags", "created", "modified", "category", "author"]
+extended_fields = ["status", "focus", "title", "subject", "organizer", "location"]
+auto_discovery = true
+max_auto_fields = 10
