@@ -37,4 +37,12 @@
 **Rationale:** Developer-friendly, scriptable, clear separation of concerns
 **Consequences:** Need comprehensive CLI help and error handling
 
-**Last Updated:** 2025-08-23
+### ADR-006: MCP Timeout Handling Strategy  
+**Date:** 2025-08-31
+**Status:** Proposed
+**Decision:** Implement multi-layered timeout handling: progress notifications, chunked processing, async operations, and client configuration
+**Rationale:** MCP error 32001 (request timeout) prevents reliable operation with large document sets; need comprehensive solution addressing all timeout scenarios
+**Consequences:** Increased complexity but significantly improved reliability for long-running operations
+**Reference:** https://mcpcat.io/guides/fixing-mcp-error-32001-request-timeout/
+
+**Last Updated:** 2025-08-31

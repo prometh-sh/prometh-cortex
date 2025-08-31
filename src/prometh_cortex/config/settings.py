@@ -108,6 +108,60 @@ class Config(BaseModel):
         description="Maximum number of auto-discovered fields to enable"
     )
     
+    # MCP timeout configuration
+    mcp_default_timeout: int = Field(
+        default=60,
+        ge=10, le=600,
+        description="Default timeout for MCP operations in seconds"
+    )
+    mcp_max_timeout: int = Field(
+        default=300,
+        ge=60, le=1800,
+        description="Maximum timeout for MCP operations in seconds"
+    )
+    mcp_progress_interval: int = Field(
+        default=5,
+        ge=1, le=30,
+        description="Progress update interval in seconds"
+    )
+    mcp_chunk_size: int = Field(
+        default=50,
+        ge=10, le=200,
+        description="Default chunk size for chunked queries"
+    )
+    mcp_max_concurrent_ops: int = Field(
+        default=10,
+        ge=1, le=50,
+        description="Maximum concurrent operations"
+    )
+    
+    # MCP async operations
+    mcp_enable_async: bool = Field(
+        default=True,
+        description="Enable async operation processing"
+    )
+    mcp_operation_ttl: int = Field(
+        default=1800,
+        ge=300, le=86400,
+        description="Operation time-to-live in seconds"
+    )
+    mcp_cleanup_interval: int = Field(
+        default=300,
+        ge=60, le=3600,
+        description="Cleanup interval for completed operations in seconds"
+    )
+    
+    # MCP startup optimization
+    mcp_max_startup_time: float = Field(
+        default=50.0,
+        ge=10.0, le=120.0,
+        description="Maximum server startup time in seconds"
+    )
+    mcp_lazy_load_index: bool = Field(
+        default=True,
+        description="Enable lazy loading of index to speed up startup"
+    )
+    
     class Config:
         """Pydantic configuration."""
         env_prefix = ""
@@ -336,6 +390,63 @@ def _load_from_env() -> Config:
         except ValueError:
             raise ConfigValidationError(f"Invalid STRUCTURED_QUERY_MAX_AUTO_FIELDS value: {structured_query_max_auto_fields}")
     
+    # MCP timeout configuration
+    if mcp_default_timeout := os.getenv("MCP_DEFAULT_TIMEOUT"):
+        try:
+            config_data["mcp_default_timeout"] = int(mcp_default_timeout)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_DEFAULT_TIMEOUT value: {mcp_default_timeout}")
+    
+    if mcp_max_timeout := os.getenv("MCP_MAX_TIMEOUT"):
+        try:
+            config_data["mcp_max_timeout"] = int(mcp_max_timeout)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_MAX_TIMEOUT value: {mcp_max_timeout}")
+    
+    if mcp_progress_interval := os.getenv("MCP_PROGRESS_INTERVAL"):
+        try:
+            config_data["mcp_progress_interval"] = int(mcp_progress_interval)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_PROGRESS_INTERVAL value: {mcp_progress_interval}")
+    
+    if mcp_chunk_size := os.getenv("MCP_CHUNK_SIZE"):
+        try:
+            config_data["mcp_chunk_size"] = int(mcp_chunk_size)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_CHUNK_SIZE value: {mcp_chunk_size}")
+    
+    if mcp_max_concurrent_ops := os.getenv("MCP_MAX_CONCURRENT_OPS"):
+        try:
+            config_data["mcp_max_concurrent_ops"] = int(mcp_max_concurrent_ops)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_MAX_CONCURRENT_OPS value: {mcp_max_concurrent_ops}")
+    
+    # MCP async operations
+    if mcp_enable_async := os.getenv("MCP_ENABLE_ASYNC"):
+        config_data["mcp_enable_async"] = mcp_enable_async.lower() in ("true", "1", "yes", "on")
+    
+    if mcp_operation_ttl := os.getenv("MCP_OPERATION_TTL"):
+        try:
+            config_data["mcp_operation_ttl"] = int(mcp_operation_ttl)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_OPERATION_TTL value: {mcp_operation_ttl}")
+    
+    if mcp_cleanup_interval := os.getenv("MCP_CLEANUP_INTERVAL"):
+        try:
+            config_data["mcp_cleanup_interval"] = int(mcp_cleanup_interval)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_CLEANUP_INTERVAL value: {mcp_cleanup_interval}")
+    
+    # MCP startup optimization
+    if mcp_max_startup_time := os.getenv("MCP_MAX_STARTUP_TIME"):
+        try:
+            config_data["mcp_max_startup_time"] = float(mcp_max_startup_time)
+        except ValueError:
+            raise ConfigValidationError(f"Invalid MCP_MAX_STARTUP_TIME value: {mcp_max_startup_time}")
+    
+    if mcp_lazy_load_index := os.getenv("MCP_LAZY_LOAD_INDEX"):
+        config_data["mcp_lazy_load_index"] = mcp_lazy_load_index.lower() in ("true", "1", "yes", "on")
+    
     # Validate and create configuration
     try:
         return Config(**config_data)
@@ -405,6 +516,32 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
         env_vars["STRUCTURED_QUERY_AUTO_DISCOVERY"] = str(config.structured_query_auto_discovery).lower()
     if config.structured_query_max_auto_fields:
         env_vars["STRUCTURED_QUERY_MAX_AUTO_FIELDS"] = str(config.structured_query_max_auto_fields)
+    
+    # MCP timeout configuration
+    if config.mcp_default_timeout:
+        env_vars["MCP_DEFAULT_TIMEOUT"] = str(config.mcp_default_timeout)
+    if config.mcp_max_timeout:
+        env_vars["MCP_MAX_TIMEOUT"] = str(config.mcp_max_timeout)
+    if config.mcp_progress_interval:
+        env_vars["MCP_PROGRESS_INTERVAL"] = str(config.mcp_progress_interval)
+    if config.mcp_chunk_size:
+        env_vars["MCP_CHUNK_SIZE"] = str(config.mcp_chunk_size)
+    if config.mcp_max_concurrent_ops:
+        env_vars["MCP_MAX_CONCURRENT_OPS"] = str(config.mcp_max_concurrent_ops)
+    
+    # MCP async operations
+    if config.mcp_enable_async is not None:
+        env_vars["MCP_ENABLE_ASYNC"] = str(config.mcp_enable_async).lower()
+    if config.mcp_operation_ttl:
+        env_vars["MCP_OPERATION_TTL"] = str(config.mcp_operation_ttl)
+    if config.mcp_cleanup_interval:
+        env_vars["MCP_CLEANUP_INTERVAL"] = str(config.mcp_cleanup_interval)
+    
+    # MCP startup optimization
+    if config.mcp_max_startup_time:
+        env_vars["MCP_MAX_STARTUP_TIME"] = str(config.mcp_max_startup_time)
+    if config.mcp_lazy_load_index is not None:
+        env_vars["MCP_LAZY_LOAD_INDEX"] = str(config.mcp_lazy_load_index).lower()
     
     return env_vars
 
@@ -487,6 +624,42 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
         if "max_auto_fields" in structured_query:
             config_data["structured_query_max_auto_fields"] = structured_query["max_auto_fields"]
     
+    # MCP timeout configuration
+    if "mcp" in toml_data:
+        mcp = toml_data["mcp"]
+        
+        # Timeout settings
+        if "timeouts" in mcp:
+            timeouts = mcp["timeouts"]
+            if "default_query_timeout" in timeouts:
+                config_data["mcp_default_timeout"] = timeouts["default_query_timeout"]
+            if "max_query_timeout" in timeouts:
+                config_data["mcp_max_timeout"] = timeouts["max_query_timeout"]
+            if "progress_update_interval" in timeouts:
+                config_data["mcp_progress_interval"] = timeouts["progress_update_interval"]
+            if "chunk_size_default" in timeouts:
+                config_data["mcp_chunk_size"] = timeouts["chunk_size_default"]
+            if "max_concurrent_operations" in timeouts:
+                config_data["mcp_max_concurrent_ops"] = timeouts["max_concurrent_operations"]
+        
+        # Async operations
+        if "async_operations" in mcp:
+            async_ops = mcp["async_operations"]
+            if "enable_async_processing" in async_ops:
+                config_data["mcp_enable_async"] = async_ops["enable_async_processing"]
+            if "operation_ttl_seconds" in async_ops:
+                config_data["mcp_operation_ttl"] = async_ops["operation_ttl_seconds"]
+            if "cleanup_interval_seconds" in async_ops:
+                config_data["mcp_cleanup_interval"] = async_ops["cleanup_interval_seconds"]
+        
+        # Startup optimization
+        if "startup" in mcp:
+            startup = mcp["startup"]
+            if "max_startup_time" in startup:
+                config_data["mcp_max_startup_time"] = startup["max_startup_time"]
+            if "lazy_load_index" in startup:
+                config_data["mcp_lazy_load_index"] = startup["lazy_load_index"]
+    
     return config_data
 
 
@@ -542,6 +715,26 @@ core_fields = ["tags", "created", "modified", "category", "author"]
 extended_fields = ["status", "focus", "title", "subject", "organizer", "location"]
 auto_discovery = true
 max_auto_fields = 10
+
+# MCP timeout handling configuration
+[mcp.timeouts]
+# Timeout settings for MCP operations
+default_query_timeout = 60          # Default timeout in seconds
+max_query_timeout = 300             # Maximum timeout in seconds
+progress_update_interval = 5        # Progress update interval in seconds
+chunk_size_default = 50             # Default chunk size for chunked queries
+max_concurrent_operations = 10      # Maximum concurrent operations
+
+[mcp.async_operations]
+# Async operation management
+enable_async_processing = true      # Enable async operation processing
+operation_ttl_seconds = 1800        # Operation time-to-live (30 minutes)
+cleanup_interval_seconds = 300      # Cleanup interval (5 minutes)
+
+[mcp.startup]
+# Startup optimization settings
+max_startup_time = 50.0             # Maximum server startup time in seconds
+lazy_load_index = true              # Enable lazy loading of index
 """
     
     path.write_text(sample_content)

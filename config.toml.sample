@@ -48,3 +48,23 @@ core_fields = ["tags", "created", "modified", "category", "author"]
 extended_fields = ["status", "focus", "title", "subject", "organizer", "location"]
 auto_discovery = true
 max_auto_fields = 10
+
+# MCP timeout handling configuration
+[mcp.timeouts]
+# Timeout settings for MCP operations
+default_query_timeout = 60          # Default timeout in seconds
+max_query_timeout = 300             # Maximum timeout in seconds
+progress_update_interval = 5        # Progress update interval in seconds
+chunk_size_default = 50             # Default chunk size for chunked queries
+max_concurrent_operations = 10      # Maximum concurrent operations
+
+[mcp.async_operations]
+# Async operation management
+enable_async_processing = true      # Enable async operation processing
+operation_ttl_seconds = 1800        # Operation time-to-live (30 minutes)
+cleanup_interval_seconds = 300      # Cleanup interval (5 minutes)
+
+[mcp.startup]
+# Startup optimization settings
+max_startup_time = 50.0             # Maximum server startup time in seconds
+lazy_load_index = true              # Enable lazy loading of index

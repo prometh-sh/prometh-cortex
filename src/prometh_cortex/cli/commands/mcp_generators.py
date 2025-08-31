@@ -28,6 +28,8 @@ def generate_config(target: str, config: Config) -> Tuple[Dict[str, Any], str]:
         return generate_vscode_config(config)
     elif target == "codex":
         return generate_codex_config(config)
+    elif target == "perplexity":
+        return generate_perplexity_config(config)
     else:
         raise ValueError(f"Unsupported target: {target}")
 
@@ -144,6 +146,43 @@ def generate_codex_config(config: Config) -> Tuple[Dict[str, Any], str]:
     return codex_config, default_path
 
 
+def generate_perplexity_config(config: Config) -> Tuple[Dict[str, Any], str]:
+    """Generate Perplexity MCP configuration.
+    
+    Args:
+        config: Prometh-Cortex configuration object
+        
+    Returns:
+        Tuple of (config_dict, default_output_path)
+    """
+    # Find pcortex executable
+    pcortex_path = _find_pcortex_executable()
+    
+    # Convert config to environment variables
+    env_vars = config_to_env_vars(config)
+    
+    # Build the Perplexity MCP server configuration
+    # Perplexity uses a simple JSON format with command, args, and env
+    perplexity_config = {
+        "command": pcortex_path,
+        "args": [
+            "mcp",
+            "start"
+        ],
+        "env": env_vars
+    }
+    
+    # Default Perplexity MCP config path
+    if sys.platform == "darwin":
+        default_path = str(Path.home() / ".perplexity/mcp_servers/prometh-cortex.json")
+    elif sys.platform == "win32":
+        default_path = str(Path.home() / ".perplexity/mcp_servers/prometh-cortex.json")
+    else:  # Linux
+        default_path = str(Path.home() / ".perplexity/mcp_servers/prometh-cortex.json")
+    
+    return perplexity_config, default_path
+
+
 def _find_pcortex_executable() -> str:
     """Find the pcortex executable path.
     
@@ -244,6 +283,14 @@ Usage in Codex CLI:
 1. Copy the generated configuration to your ~/.codex/config.toml
 2. Restart Codex CLI or reload configuration
 3. Use tools: "Search my documents for..." or "Check prometh-cortex health"
+"""
+    elif target == "perplexity":
+        summary += f"""
+Usage in Perplexity:
+1. Copy the generated configuration to your Perplexity MCP servers directory
+2. Restart Perplexity or reload MCP servers
+3. Use tools: "Search my documents for..." or "Check prometh-cortex health"
+4. Query with: "Search my local knowledge base for information about..."
 """
     
     return summary
