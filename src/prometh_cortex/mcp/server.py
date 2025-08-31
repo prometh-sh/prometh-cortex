@@ -9,6 +9,7 @@ import json
 import logging
 import sys
 import time
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,13 @@ from fastmcp import FastMCP
 from prometh_cortex.config import load_config
 from prometh_cortex.indexer import DocumentIndexer, IndexerError
 from prometh_cortex.parser import parse_markdown_file
+from prometh_cortex.mcp.timeout_handler import (
+    ProgressReporter,
+    StartupOptimizer,
+    ChunkedQueryProcessor,
+    AsyncOperationManager
+)
+from prometh_cortex.mcp.enhanced_tools import setup_enhanced_tools
 
 
 # Set up logging for MCP server (absolute minimal logging to avoid protocol issues)
@@ -40,34 +48,67 @@ config = None
 indexer = None
 mcp = FastMCP("prometh-cortex")
 
+# Timeout handling components
+progress_reporter = None
+startup_optimizer = None
+cleanup_task = None
 
-def initialize_server():
-    """Initialize the MCP server with configuration and indexer."""
-    global config, indexer
+
+async def initialize_server():
+    """Initialize the MCP server with configuration and indexer using startup optimization."""
+    global config, indexer, progress_reporter, startup_optimizer, cleanup_task
     
     try:
-        # Load configuration (suppress startup messages for MCP protocol)
+        # Load configuration first
         config = load_config()
         
-        # Initialize indexer but DON'T load index yet (lazy loading)
-        # This prevents timeout during MCP server startup
+        # Initialize timeout handling components with config values
+        progress_interval = getattr(config, 'mcp_progress_interval', 5)
+        max_startup_time = getattr(config, 'mcp_max_startup_time', 50.0)
+        lazy_load = getattr(config, 'mcp_lazy_load_index', True)
+        
+        progress_reporter = ProgressReporter(update_interval=progress_interval)
+        startup_optimizer = StartupOptimizer(progress_reporter, max_startup_time=max_startup_time)
+        
+        # Use startup optimizer for fast initialization
+        await startup_optimizer.initialize_server(
+            config_loader=lambda: config,
+            indexer_factory=lambda: DocumentIndexer(config)
+        )
+        
+        # Create indexer but don't load index if lazy loading is enabled
         indexer = DocumentIndexer(config)
-        # indexer.load_index() - Move this to lazy_load_index()
+        if not lazy_load:
+            # Load index immediately if lazy loading is disabled
+            await startup_optimizer.lazy_load_index(indexer)
+        
+        # Setup enhanced MCP tools with timeout handling
+        await setup_enhanced_tools(mcp, indexer, config)
+        
+        # Start cleanup task with configuration
+        from prometh_cortex.mcp.enhanced_tools import cleanup_timeout_operations
+        cleanup_task = asyncio.create_task(cleanup_timeout_operations(config))
+        
+        logger.debug("MCP server initialized successfully with timeout handling")
         
     except Exception as e:
+        logger.critical(f"MCP server initialization failed: {e}")
         # For MCP protocol, we need to exit cleanly without extra output
-        # The error will be handled by the MCP client
         sys.exit(1)
 
 
-def lazy_load_index():
+async def lazy_load_index():
     """Load the index lazily on first use to prevent startup timeout."""
-    global indexer
+    global indexer, startup_optimizer
     
     if indexer and not hasattr(indexer, '_index_loaded'):
         try:
-            indexer.load_index()
-            indexer._index_loaded = True
+            if startup_optimizer:
+                await startup_optimizer.lazy_load_index(indexer)
+            else:
+                # Fallback to sync loading
+                await asyncio.to_thread(indexer.load_index)
+                indexer._index_loaded = True
         except Exception as e:
             # Only log critical index loading failures
             logger.critical(f"Index loading failed: {e}")
@@ -107,7 +148,7 @@ async def prometh_cortex_query(
     """
     try:
         # Lazy load index on first query
-        indexer = lazy_load_index()
+        indexer = await lazy_load_index()
         if not indexer:
             return {"error": "Indexer not initialized"}
         
@@ -324,7 +365,7 @@ async def prometh_cortex_health() -> Dict[str, Any]:
         # Get indexer statistics if available
         try:
             # Try to lazy load index for health check
-            indexer_instance = lazy_load_index()
+            indexer_instance = await lazy_load_index()
             if indexer_instance:
                 try:
                     index_stats = indexer_instance.get_stats()
@@ -391,17 +432,44 @@ def run_mcp_server():
     """Run the MCP server with stdio transport."""
     # Completely silent startup for MCP protocol compatibility
     
-    # Initialize server components (config only, index loaded lazily)
-    initialize_server()
+    async def async_startup():
+        """Async startup for MCP server."""
+        global cleanup_task
+        try:
+            # Initialize server components with timeout optimization
+            await initialize_server()
+            
+            # Async initialization complete, MCP server will run synchronously
+            pass
+            
+        except KeyboardInterrupt:
+            pass  # Silent shutdown
+        except Exception as e:
+            logger.critical(f"MCP server fatal error: {e}")
+            raise
+        finally:
+            # Clean up background tasks
+            if cleanup_task and not cleanup_task.done():
+                cleanup_task.cancel()
+                try:
+                    await cleanup_task
+                except asyncio.CancelledError:
+                    pass
     
-    # Run the MCP server with stdio transport (no startup logging)
+    # Run async initialization first
     try:
+        asyncio.run(async_startup())
+        
+        # Run the synchronous MCP server
         mcp.run(transport="stdio")
-    except KeyboardInterrupt:
-        pass  # Silent shutdown
+        
     except Exception as e:
-        logger.critical(f"MCP server fatal error: {e}")
+        logger.critical(f"MCP server startup failed: {e}")
         sys.exit(1)
+    finally:
+        # Clean up background tasks on shutdown
+        if cleanup_task and not cleanup_task.done():
+            cleanup_task.cancel()
 
 
 if __name__ == "__main__":

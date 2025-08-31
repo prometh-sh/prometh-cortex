@@ -75,7 +75,7 @@ def start(ctx: click.Context):
 
 
 @mcp.command()
-@click.argument("target", type=click.Choice(["claude", "vscode", "codex"]))
+@click.argument("target", type=click.Choice(["claude", "vscode", "codex", "perplexity"]))
 @click.option(
     "--output", "-o",
     type=click.Path(),
@@ -90,14 +90,15 @@ def start(ctx: click.Context):
 def init(ctx: click.Context, target: str, output: str, write: bool):
     """Generate MCP configuration for various clients.
     
-    TARGET: Configuration target (claude, vscode, codex)
+    TARGET: Configuration target (claude, vscode, codex, perplexity)
     
     Examples:
     \b
-    pcortex mcp init claude                    # Print Claude config
-    pcortex mcp init claude --write            # Write to Claude config file  
-    pcortex mcp init vscode -o settings.json  # Save VSCode config
-    pcortex mcp init codex --write             # Write to Codex config file
+    pcortex mcp init claude                      # Print Claude config
+    pcortex mcp init claude --write              # Write to Claude config file  
+    pcortex mcp init vscode -o settings.json    # Save VSCode config
+    pcortex mcp init codex --write               # Write to Codex config file
+    pcortex mcp init perplexity --write          # Write to Perplexity config file
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
@@ -120,7 +121,7 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Handle merging with existing config if needed
-            if output_path.exists() and target in ["claude", "vscode", "codex"]:
+            if output_path.exists() and target in ["claude", "vscode", "codex", "perplexity"]:
                 try:
                     with open(output_path, 'r') as f:
                         content = f.read()
@@ -133,7 +134,7 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
                             existing = tomllib.loads(content)
                         else:
                             # Try to fix common JSON issues (trailing commas)
-                            if target == "vscode":
+                            if target in ["vscode", "perplexity"]:
                                 import re
                                 # Remove trailing commas before closing braces/brackets
                                 content = re.sub(r',(\s*[}\]])', r'\1', content)
@@ -163,6 +164,9 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
                         existing["mcp_servers"] = {}
                     existing["mcp_servers"].update(config_data["mcp_servers"])
                     config_data = existing
+                elif target == "perplexity":
+                    # Perplexity uses simple JSON format, just overwrite
+                    pass  # config_data already contains the new configuration
             
             with open(output_path, 'w') as f:
                 if target == "codex":
