@@ -23,6 +23,15 @@
 - [ ] Performance optimization (<100ms queries)
 - [ ] OSS preparation (linting, testing, documentation)
 
-## Current Status: Planning Phase
-**Last Updated:** 2025-08-23
-**Next Milestone:** Configuration layer implementation
+### Phase 4: MCP Timeout Handling Enhancement (v1.1.0)
+- [ ] Progress notification system implementation
+- [ ] Chunked query processing for large datasets  
+- [ ] Async operation management with polling
+- [ ] Client-side timeout configuration
+- [ ] Connection keepalive mechanism
+- [ ] Timeout monitoring and troubleshooting tools
+
+## Current Status: Implementation Phase
+**Last Updated:** 2025-08-31
+**Next Milestone:** MCP Timeout Handling Solutions (feature-mcp-timeout-handling-spec.md)
+**Specification Created:** docs/specs/feature-mcp-timeout-handling-spec.md
