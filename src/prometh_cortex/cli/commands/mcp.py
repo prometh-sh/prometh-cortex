@@ -170,8 +170,18 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
             
             with open(output_path, 'w') as f:
                 if target == "codex":
-                    import tomli_w
-                    f.write(tomli_w.dumps(config_data))
+                    # Check if we need custom TOML formatting for inline env table
+                    needs_custom_format = any(
+                        "_env_inline" in server_config 
+                        for server_config in config_data.get("mcp_servers", {}).values()
+                    )
+                    
+                    if needs_custom_format:
+                        from .mcp_generators import _format_codex_toml
+                        f.write(_format_codex_toml(config_data))
+                    else:
+                        import tomli_w
+                        f.write(tomli_w.dumps(config_data))
                 else:
                     json.dump(config_data, f, indent=2)
             
@@ -187,8 +197,18 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
             
             with open(output_path, 'w') as f:
                 if target == "codex":
-                    import tomli_w
-                    f.write(tomli_w.dumps(config_data))
+                    # Check if we need custom TOML formatting for inline env table
+                    needs_custom_format = any(
+                        "_env_inline" in server_config 
+                        for server_config in config_data.get("mcp_servers", {}).values()
+                    )
+                    
+                    if needs_custom_format:
+                        from .mcp_generators import _format_codex_toml
+                        f.write(_format_codex_toml(config_data))
+                    else:
+                        import tomli_w
+                        f.write(tomli_w.dumps(config_data))
                 else:
                     json.dump(config_data, f, indent=2)
             
@@ -197,8 +217,18 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
         else:
             # Print to console
             if target == "codex":
-                import tomli_w
-                print(tomli_w.dumps(config_data))
+                # Check if we need custom TOML formatting for inline env table
+                needs_custom_format = any(
+                    "_env_inline" in server_config 
+                    for server_config in config_data.get("mcp_servers", {}).values()
+                )
+                
+                if needs_custom_format:
+                    from .mcp_generators import _format_codex_toml
+                    print(_format_codex_toml(config_data))
+                else:
+                    import tomli_w
+                    print(tomli_w.dumps(config_data))
             else:
                 import json
                 print(json.dumps(config_data, indent=2))

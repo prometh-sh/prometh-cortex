@@ -60,36 +60,50 @@ async def initialize_server():
     
     try:
         # Load configuration first
+        step_start = time.time()
         config = load_config()
+        logger.critical(f"Config loaded: {(time.time() - step_start):.2f}s")
         
         # Initialize timeout handling components with config values
+        step_start = time.time()
         progress_interval = getattr(config, 'mcp_progress_interval', 5)
         max_startup_time = getattr(config, 'mcp_max_startup_time', 50.0)
         lazy_load = getattr(config, 'mcp_lazy_load_index', True)
         
         progress_reporter = ProgressReporter(update_interval=progress_interval)
         startup_optimizer = StartupOptimizer(progress_reporter, max_startup_time=max_startup_time)
+        logger.critical(f"Timeout components initialized: {(time.time() - step_start):.2f}s")
         
         # Use startup optimizer for fast initialization
+        step_start = time.time()
         await startup_optimizer.initialize_server(
             config_loader=lambda: config,
             indexer_factory=lambda: DocumentIndexer(config)
         )
+        logger.critical(f"Startup optimizer completed: {(time.time() - step_start):.2f}s")
         
         # Create indexer but don't load index if lazy loading is enabled
+        step_start = time.time()
         indexer = DocumentIndexer(config)
         if not lazy_load:
             # Load index immediately if lazy loading is disabled
             await startup_optimizer.lazy_load_index(indexer)
+            logger.critical(f"Index loaded (lazy_load=False): {(time.time() - step_start):.2f}s")
+        else:
+            logger.critical(f"Indexer created (lazy_load=True): {(time.time() - step_start):.2f}s")
         
         # Setup enhanced MCP tools with timeout handling
+        step_start = time.time()
         await setup_enhanced_tools(mcp, indexer, config)
+        logger.critical(f"Enhanced MCP tools setup: {(time.time() - step_start):.2f}s")
         
         # Start cleanup task with configuration
+        step_start = time.time()
         from prometh_cortex.mcp.enhanced_tools import cleanup_timeout_operations
         cleanup_task = asyncio.create_task(cleanup_timeout_operations(config))
+        logger.critical(f"Cleanup task started: {(time.time() - step_start):.2f}s")
         
-        logger.debug("MCP server initialized successfully with timeout handling")
+        logger.critical("MCP server initialized successfully with timeout handling")
         
     except Exception as e:
         logger.critical(f"MCP server initialization failed: {e}")
@@ -431,10 +445,11 @@ async def prometh_cortex_health() -> Dict[str, Any]:
 def run_mcp_server():
     """Run the MCP server with stdio transport."""
     # Completely silent startup for MCP protocol compatibility
+    startup_start_time = time.time()
     
     async def async_startup():
         """Async startup for MCP server."""
-        global cleanup_task
+        global cleanup_task, config
         try:
             # Initialize server components with timeout optimization
             await initialize_server()
@@ -460,11 +475,24 @@ def run_mcp_server():
     try:
         asyncio.run(async_startup())
         
+        # Measure and report total startup time
+        total_startup_time = time.time() - startup_start_time
+        max_startup_time = getattr(config, 'mcp_max_startup_time', 50.0) if config else 50.0
+        
+        # Log startup time to stderr (won't interfere with MCP protocol on stdout)
+        logger.critical(f"MCP server startup completed in {total_startup_time:.2f}s (max: {max_startup_time:.2f}s)")
+        
+        if total_startup_time > max_startup_time:
+            logger.critical(f"⚠️  STARTUP EXCEEDED TARGET: {total_startup_time:.2f}s > {max_startup_time:.2f}s")
+        else:
+            logger.critical(f"✅ Startup within target: {total_startup_time:.2f}s < {max_startup_time:.2f}s")
+        
         # Run the synchronous MCP server
         mcp.run(transport="stdio")
         
     except Exception as e:
-        logger.critical(f"MCP server startup failed: {e}")
+        total_startup_time = time.time() - startup_start_time
+        logger.critical(f"MCP server startup failed after {total_startup_time:.2f}s: {e}")
         sys.exit(1)
     finally:
         # Clean up background tasks on shutdown
