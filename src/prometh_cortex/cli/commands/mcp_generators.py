@@ -9,6 +9,46 @@ from typing import Dict, Any, Tuple
 from prometh_cortex.config.settings import Config, config_to_env_vars
 
 
+def _format_codex_toml(config_dict: Dict[str, Any]) -> str:
+    """Format TOML configuration for Codex CLI with inline env table.
+    
+    Args:
+        config_dict: Configuration dictionary with special _env_inline marker
+        
+    Returns:
+        Properly formatted TOML string
+    """
+    toml_lines = []
+    
+    for section_name, section_data in config_dict.items():
+        toml_lines.append(f"[{section_name}]")
+        
+        for subsection_name, subsection_data in section_data.items():
+            toml_lines.append(f"")  # Empty line before subsection
+            toml_lines.append(f"[{section_name}.{subsection_name}]")
+            
+            for key, value in subsection_data.items():
+                if key == "_env_inline":
+                    # Format as inline table
+                    env_pairs = []
+                    for env_key, env_value in value.items():
+                        # Escape quotes in values
+                        escaped_value = env_value.replace('"', '\\"')
+                        env_pairs.append(f'"{env_key}" = "{escaped_value}"')
+                    
+                    inline_table = "{ " + ", ".join(env_pairs) + " }"
+                    toml_lines.append(f"env = {inline_table}")
+                elif key == "args":
+                    # Format args array
+                    args_str = "[" + ", ".join(f'"{arg}"' for arg in value) + "]"
+                    toml_lines.append(f'{key} = {args_str}')
+                else:
+                    # Regular string value
+                    toml_lines.append(f'{key} = "{value}"')
+    
+    return "\n".join(toml_lines)
+
+
 def generate_config(target: str, config: Config) -> Tuple[Dict[str, Any], str]:
     """Generate MCP configuration for the specified target.
     
@@ -125,12 +165,14 @@ def generate_codex_config(config: Config) -> Tuple[Dict[str, Any], str]:
     env_vars = config_to_env_vars(config)
     
     # Build the Codex MCP server configuration in TOML format
+    # Codex CLI expects env as an inline table: env = { "KEY" = "value" }
+    # We need to return a special marker to indicate custom TOML formatting is needed
     codex_config = {
         "mcp_servers": {
             "prometh-cortex": {
                 "command": pcortex_path,
                 "args": ["mcp", "start"],
-                "env": env_vars
+                "_env_inline": env_vars  # Special marker for inline table formatting
             }
         }
     }
