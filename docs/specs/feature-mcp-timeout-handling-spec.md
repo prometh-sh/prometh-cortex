@@ -7,6 +7,7 @@ Implement comprehensive timeout handling mechanisms for the Prometh-Cortex MCP s
 
 ### Clear Problem Statement
 The current MCP server implementation experiences timeout failures when:
+- **Server startup** takes longer than 50 seconds during initialization
 - Large document queries take >60 seconds to process
 - Index loading operations exceed timeout limits during cold starts
 - Complex semantic searches with full content loading cause connection drops
@@ -15,6 +16,7 @@ The current MCP server implementation experiences timeout failures when:
 **Reference**: [MCP Timeout Solutions Guide](https://mcpcat.io/guides/fixing-mcp-error-32001-request-timeout/)
 
 ### Success Metrics
+- **Startup Performance**: MCP server initialization completes in <50 seconds
 - **Availability**: Achieve 99.9% query success rate for operations <5 minutes
 - **Performance**: Maintain <2s response time for progress notifications
 - **Reliability**: Zero timeout errors for queries processing <1000 documents
@@ -59,6 +61,13 @@ The current MCP server implementation experiences timeout failures when:
 
 ## 3. Technical Requirements
 
+### Startup Performance Requirements
+- **Maximum Startup Time**: MCP server must be ready to accept connections within 50 seconds
+- **Lazy Loading**: Implement deferred index loading to reduce initial startup time
+- **Startup Progress**: Report initialization progress to prevent client timeout during startup
+- **Health Check**: Provide `/health` endpoint that responds during startup with initialization status
+- **Configuration Validation**: Front-load all configuration validation to fail fast
+
 ### Architecture Components
 
 #### 1. Progress Notification System
@@ -92,6 +101,17 @@ class AsyncOperationManager:
     async def submit_operation(self, operation: Callable) -> str  # Returns operation ID
     async def get_operation_status(self, operation_id: str) -> OperationStatus
     async def get_operation_result(self, operation_id: str) -> Any
+```
+
+#### 4. Startup Optimization Manager
+```python
+class StartupOptimizer:
+    """Optimizes MCP server startup to meet <50s requirement."""
+    
+    async def initialize_server(self) -> None
+    async def lazy_load_index(self) -> None
+    async def report_startup_progress(self, stage: str, progress: float) -> None
+    def get_startup_status(self) -> Dict[str, Any]
 ```
 
 ### API Specifications
@@ -293,6 +313,46 @@ MCP_KEEPALIVE_INTERVAL=30
 ## 5. Test Cases
 
 ### Unit Test Scenarios
+
+#### Startup Performance Tests
+```python
+async def test_startup_time_requirement():
+    """Test that MCP server starts within 50 seconds."""
+    start_time = time.time()
+    server = MCPServer()
+    await server.initialize()
+    
+    startup_duration = time.time() - start_time
+    assert startup_duration < 50.0, f"Startup took {startup_duration}s, exceeds 50s limit"
+
+async def test_lazy_index_loading():
+    """Test that index loading is deferred during startup."""
+    server = MCPServer()
+    await server.initialize()
+    
+    # Server should be ready without full index load
+    assert server.is_ready()
+    assert not server.index_fully_loaded()
+    
+    # Index should load on first query
+    await server.query("test query")
+    assert server.index_fully_loaded()
+
+async def test_startup_progress_reporting():
+    """Test startup progress is reported correctly."""
+    optimizer = StartupOptimizer()
+    progress_events = []
+    
+    async def capture_progress(stage, progress):
+        progress_events.append((stage, progress))
+    
+    optimizer.on_progress = capture_progress
+    await optimizer.initialize_server()
+    
+    # Verify progress stages are reported
+    assert len(progress_events) >= 3
+    assert progress_events[-1][1] == 1.0  # Final progress should be 100%
+```
 
 #### Progress Notification Tests
 ```python
