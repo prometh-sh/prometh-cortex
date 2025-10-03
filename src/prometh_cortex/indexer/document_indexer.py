@@ -186,15 +186,21 @@ class DocumentIndexer:
                 self.change_detector.reset()
                 self.vector_store.delete_collection()
                 self.vector_store.initialize()
-                
+
                 # Add all documents
                 stats = self.add_documents([Path(p) for p in document_paths])
-                
-                # Update change detector metadata
-                changes = [
-                    DocumentChange(file_path=p, change_type='add') 
-                    for p in document_paths
-                ]
+
+                # Update change detector metadata with proper hashes and mtimes
+                changes = []
+                for p in document_paths:
+                    import os
+                    if os.path.exists(p):
+                        changes.append(DocumentChange(
+                            file_path=p,
+                            change_type='add',
+                            file_hash=self.change_detector._compute_file_hash(p),
+                            modified_time=os.path.getmtime(p)
+                        ))
                 self.change_detector.update_metadata(changes)
                 
             else:

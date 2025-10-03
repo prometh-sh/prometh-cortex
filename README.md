@@ -1,5 +1,8 @@
 # Prometh Cortex
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-green.svg)](https://docs.anthropic.com/en/docs/claude-code)
+
 Multi-Datalake RAG Indexer with Local MCP Integration
 
 ## Overview

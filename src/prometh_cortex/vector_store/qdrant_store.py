@@ -412,7 +412,7 @@ class QdrantVectorStore(VectorStoreInterface):
             collection_info = self.client.get_collection(self.collection_name)
             stats.update({
                 "status": collection_info.status.value,
-                "total_vectors": collection_info.vectors_count or 0,
+                "total_vectors": collection_info.points_count or 0,
                 "total_points": collection_info.points_count or 0,
                 "disk_usage": collection_info.segments_count or 0,
             })
