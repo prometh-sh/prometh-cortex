@@ -357,24 +357,33 @@ focus: Work
 uuid: document-uuid
 project:
   - name: Project Name
-    uuid: project-uuid
+    uuid: project-uuid            # UUID preserved for document linking
 reminder:
   - subject: Reminder Text
-    uuid: reminder-uuid
+    uuid: reminder-uuid           # UUID preserved for document linking
     list: List Name
 event:
   subject: Event Subject
-  uuid: event-uuid
+  uuid: event-uuid                # UUID preserved for document linking
+  shortUUID: MF042576B            # Short UUID also preserved
   organizer: Organizer Name
   attendees:
     - Attendee 1
     - Attendee 2
   location: Event Location
+  start: YYYY-MM-DDTHH:MM:SS      # Event start time
+  end: YYYY-MM-DDTHH:MM:SS        # Event end time
 related:
   - Related Item 1
   - Related Item 2
 ---
 ```
+
+**Note on UUIDs for Document Linking:**
+- Project, reminder, and event UUIDs are **preserved** in vector store metadata
+- These UUIDs enable cross-document linking and relationship queries
+- Use these UUIDs to find related documents across your datalake
+- Query by UUID: `event_uuid:B897515C-1BE9-41B6-8423-3988BE0C9E3E`
 
 ### YAML Frontmatter Best Practices
 
