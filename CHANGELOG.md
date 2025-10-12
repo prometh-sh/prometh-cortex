@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved README with table of contents and enhanced documentation
 - Updated author email to prometh-cortex@prometh.sh
 - Enhanced security by adding .pypirc to .gitignore
+- **BREAKING**: Minimum Python version updated from 3.9 to 3.10 (required by fastmcp dependency)
 
 ### Fixed
 - Security: Prevented PyPI credentials from being committed to repository
+- CI/CD: Fixed Python version compatibility for fastmcp dependency
 
 ## [0.1.0] - 2025-01-15
 
