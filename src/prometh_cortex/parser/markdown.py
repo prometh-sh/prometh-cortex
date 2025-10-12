@@ -136,11 +136,20 @@ class MarkdownDocument(BaseModel):
             
             # For arrays of complex objects, extract meaningful fields
             if all(isinstance(item, dict) for item in value):
-                # Extract names/subjects for searchability
+                # Extract names/subjects for searchability while preserving structure
                 if key in ['project', 'projects']:
-                    return [item.get('name', str(item)) for item in value]
+                    # Preserve both name and uuid for linking
+                    return [{
+                        'name': item.get('name', str(item)),
+                        'uuid': item.get('uuid')
+                    } for item in value]
                 elif key in ['reminder', 'reminders']:
-                    return [item.get('subject', str(item)) for item in value]
+                    # Preserve subject, uuid, and list for linking
+                    return [{
+                        'subject': item.get('subject', str(item)),
+                        'uuid': item.get('uuid'),
+                        'list': item.get('list')
+                    } for item in value]
                 elif key in ['attendees', 'related']:
                     return value  # Already simple strings
                 else:
@@ -156,19 +165,23 @@ class MarkdownDocument(BaseModel):
             if key == 'event':
                 event_fields = {}
                 if 'subject' in value:
-                    event_fields['event_subject'] = value['subject']
+                    event_fields['subject'] = value['subject']
+                if 'uuid' in value:
+                    event_fields['uuid'] = value['uuid']
+                if 'shortUUID' in value or 'short_uuid' in value:
+                    event_fields['short_uuid'] = value.get('shortUUID') or value.get('short_uuid')
                 if 'organizer' in value:
-                    event_fields['event_organizer'] = value['organizer']
+                    event_fields['organizer'] = value['organizer']
                 if 'location' in value:
-                    event_fields['event_location'] = value['location']
+                    event_fields['location'] = value['location']
                 if 'attendees' in value:
-                    event_fields['event_attendees'] = value['attendees']
+                    event_fields['attendees'] = value['attendees']
                 if 'start' in value:
                     start = value['start']
-                    event_fields['event_start'] = start.isoformat() if hasattr(start, 'isoformat') else str(start)
+                    event_fields['start'] = start.isoformat() if hasattr(start, 'isoformat') else str(start)
                 if 'end' in value:
                     end = value['end']
-                    event_fields['event_end'] = end.isoformat() if hasattr(end, 'isoformat') else str(end)
+                    event_fields['end'] = end.isoformat() if hasattr(end, 'isoformat') else str(end)
                 return event_fields
             else:
                 # For other dict objects, convert to searchable string

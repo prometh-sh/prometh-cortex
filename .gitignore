@@ -76,8 +76,15 @@ config.toml
 *.tmp
 *.log
 
+# Local configuration and overrides
+*.local
+
 # Data directories (should be configured by user)
 data/
 
 # Prometh-Cortex system for incremental indexing.
 .prometh_cortex_qdrant/
+
+# Prometh Framework temporary files (keep PROMETH.md tracked)
+.prometh-spec/
+.prometh-build/

@@ -100,6 +100,7 @@ def health(ctx: click.Context, detailed: bool):
         sys.exit(1)
     else:
         # Healthy state - show beautiful dashboard
+        health_data["health_check_time_ms"] = health_check_time
         health_table = ClaudeResultsTable.create_health_dashboard(health_data)
         console.print(health_table)
         console.print()
