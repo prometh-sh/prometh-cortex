@@ -7,7 +7,7 @@ name = "prometh-cortex"
 version = "0.1.0"
 description = "Multi-Datalake RAG Indexer with Local MCP Integration"
 authors = [
-    {name = "Ivan Nagy", email = "ivan@example.com"},
+    {name = "Ivan Nagy", email = "prometh-cortex@prometh.sh"},
 ]
 readme = "README.md"
 license = {file = "LICENSE"}

@@ -1,9 +1,30 @@
 # Prometh Cortex
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI version](https://img.shields.io/pypi/v/prometh-cortex.svg)](https://pypi.org/project/prometh-cortex/)
+[![Python Support](https://img.shields.io/pypi/pyversions/prometh-cortex.svg)](https://pypi.org/project/prometh-cortex/)
+[![Tests](https://github.com/ivannagy/prometh-cortex/actions/workflows/test.yml/badge.svg)](https://github.com/ivannagy/prometh-cortex/actions/workflows/test.yml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-green.svg)](https://docs.anthropic.com/en/docs/claude-code)
 
 Multi-Datalake RAG Indexer with Local MCP Integration
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Vector Store Configuration](#vector-store-configuration)
+- [CLI Commands](#cli-commands)
+- [Integration](#integration)
+  - [Claude Desktop](#claude-desktop-integration)
+  - [Perplexity](#perplexity-integration)
+  - [VSCode](#vscode-with-github-copilot-integration)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
 
 ## Overview
 
@@ -21,8 +42,15 @@ Prometh Cortex is a local-first, extensible system for indexing multiple datalak
 
 ## Installation
 
+### From PyPI (Recommended)
+
 ```bash
-# Install from source
+pip install prometh-cortex
+```
+
+### From Source (Development)
+
+```bash
 git clone https://github.com/ivannagy/prometh-cortex.git
 cd prometh-cortex
 pip install -e ".[dev]"
@@ -1007,15 +1035,45 @@ Apache 2.0 License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+### Quick Contribution Guide
+
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Make your changes with clear, descriptive commits
 4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
+5. Ensure all tests pass: `pytest`
+6. Format code: `black src/ tests/` and `isort src/ tests/`
+7. Submit a pull request with a clear description
+
+### Code of Conduct
+
+This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold this code.
+
+### Security
+
+Found a security vulnerability? Please see [SECURITY.md](SECURITY.md) for responsible disclosure guidelines.
 
 ## Support
 
-- **Documentation**: See `/docs` directory
-- **Issues**: https://github.com/ivannagy/prometh-cortex/issues
-- **Discussions**: https://github.com/ivannagy/prometh-cortex/discussions
+### Getting Help
+
+- **Documentation**: See the [/docs](docs/) directory for detailed guides
+- **Issues**: Report bugs or request features via [GitHub Issues](https://github.com/ivannagy/prometh-cortex/issues)
+- **Discussions**: Ask questions or share ideas in [GitHub Discussions](https://github.com/ivannagy/prometh-cortex/discussions)
+- **Security**: For security issues, see [SECURITY.md](SECURITY.md)
+
+### Resources
+
+- **PyPI Package**: https://pypi.org/project/prometh-cortex/
+- **Source Code**: https://github.com/ivannagy/prometh-cortex
+- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history
+
+### Community
+
+We encourage community participation! Whether you're fixing bugs, adding features, improving documentation, or helping others, all contributions are valued.
+
+---
+
+**Made with ❤️ for the knowledge management community**
