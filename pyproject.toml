@@ -4,20 +4,19 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prometh-cortex"
-version = "0.1.0"
+version = "0.1.1"
 description = "Multi-Datalake RAG Indexer with Local MCP Integration"
 authors = [
-    {name = "Ivan Nagy", email = "ivan@example.com"},
+    {name = "Ivan Nagy", email = "prometh-cortex@prometh.sh"},
 ]
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
