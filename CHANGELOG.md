@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-10-12
+
+### Added
+- Comprehensive CI/CD workflows with multi-OS testing (Ubuntu, macOS, Windows)
+- GitHub Actions workflows for automated testing and PyPI publishing
+- Coverage reporting with Codecov integration
+- Build validation in CI pipeline
+
 ### Changed
-- Updated documentation for public repository release
-- Added comprehensive CODE_OF_CONDUCT.md, CONTRIBUTING.md, SECURITY.md, and NOTICE files
+- Updated README with PyPI installation badges and status indicators
+- Improved README with table of contents and enhanced documentation
+- Updated author email to prometh-cortex@prometh.sh
+- Enhanced security by adding .pypirc to .gitignore
+
+### Fixed
+- Security: Prevented PyPI credentials from being committed to repository
 
 ## [0.1.0] - 2025-01-15
 
