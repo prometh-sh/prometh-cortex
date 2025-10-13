@@ -105,22 +105,85 @@ def cli(ctx: click.Context, config: Optional[Path], verbose: bool):
 
 @cli.command()
 @click.option(
-    "--sample", 
-    is_flag=True, 
-    help="Create sample config.toml file"
+    "--sample",
+    is_flag=True,
+    help="Create sample config.toml file in current directory"
 )
-def config(sample: bool):
+@click.option(
+    "--init",
+    is_flag=True,
+    help="Initialize user config directory and create sample config"
+)
+@click.option(
+    "--show-paths",
+    is_flag=True,
+    help="Show config file search paths"
+)
+def config(sample: bool, init: bool, show_paths: bool):
     """Manage configuration settings."""
-    if sample:
+    if init:
+        import os
+        from pathlib import Path
+
+        # Create XDG config directory
+        xdg_config_home = os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+        config_dir = Path(xdg_config_home) / "prometh-cortex"
+        config_file = config_dir / "config.toml"
+
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            console.print(f"[green]✓[/green] Created config directory: {config_dir}")
+
+            if config_file.exists():
+                console.print(f"[yellow]⚠[/yellow] Config file already exists: {config_file}")
+                if not click.confirm("Overwrite existing config?"):
+                    console.print("[yellow]Skipped[/yellow]")
+                    return
+
+            from prometh_cortex.config.settings import create_sample_config_file
+            create_sample_config_file(config_file)
+            console.print(f"[green]✓[/green] Created sample config: {config_file}")
+            console.print("\n[cyan]Next steps:[/cyan]")
+            console.print(f"1. Edit the config file: {config_file}")
+            console.print("2. Set your datalake paths in the [datalake] section")
+            console.print("3. Run: pcortex build")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Failed to initialize config: {e}")
+            sys.exit(1)
+    elif sample:
         from prometh_cortex.config.settings import create_sample_config_file
         try:
             create_sample_config_file()
-            console.print("[green]✓[/green] Sample config.toml file created")
+            console.print("[green]✓[/green] Sample config.toml file created in current directory")
         except Exception as e:
             console.print(f"[red]✗[/red] Failed to create sample config.toml file: {e}")
             sys.exit(1)
+    elif show_paths:
+        import os
+        from pathlib import Path
+
+        xdg_config_home = os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+
+        console.print("\n[bold cyan]Config file search paths (in order):[/bold cyan]\n")
+        paths = [
+            (Path.cwd() / "config.toml", "Current directory (highest priority)"),
+            (Path(xdg_config_home) / "prometh-cortex" / "config.toml", "XDG config directory"),
+            (Path.home() / ".prometh-cortex" / "config.toml", "Hidden directory in home"),
+        ]
+
+        for path, description in paths:
+            exists = "✓" if path.exists() else "✗"
+            color = "green" if path.exists() else "dim"
+            console.print(f"  [{color}]{exists}[/{color}] {path}")
+            console.print(f"      {description}\n")
+
+        console.print("[cyan]Tip:[/cyan] Use 'pcortex config --init' to create config in XDG directory")
     else:
-        console.print("Use --sample to create a sample configuration file")
+        console.print("Manage prometh-cortex configuration\n")
+        console.print("Options:")
+        console.print("  --sample      Create sample config.toml in current directory")
+        console.print("  --init        Initialize user config directory (recommended)")
+        console.print("  --show-paths  Show config file search paths")
 
 
 # Add command groups

@@ -58,29 +58,62 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-1. **Create configuration**:
+1. **Install via pip**:
 ```bash
-cp config.toml.sample config.toml
-# Edit config.toml with your datalake paths
+pip install prometh-cortex
 ```
 
-2. **Build index**:
+2. **Initialize configuration** (creates `~/.config/prometh-cortex/config.toml`):
+```bash
+pcortex config --init
+```
+
+3. **Edit your config file**:
+```bash
+# macOS/Linux
+nano ~/.config/prometh-cortex/config.toml
+
+# Or use your preferred editor
+# Update the [datalake] repos with your document paths
+```
+
+4. **Build index**:
 ```bash
 pcortex build
 ```
 
-3. **Query locally**:
+5. **Query locally**:
 ```bash
 pcortex query "search for something"
 ```
 
-4. **Start servers**:
+6. **Start servers**:
 ```bash
 # For Claude Desktop (MCP protocol)
 pcortex mcp
 
 # For Perplexity/VSCode/HTTP integrations
 pcortex serve
+```
+
+### Configuration File Locations
+
+Prometh-cortex follows the XDG Base Directory Specification. Config files are searched in this order:
+
+1. `./config.toml` - Current directory (highest priority)
+2. `~/.config/prometh-cortex/config.toml` - XDG config directory (recommended)
+3. `~/.prometh-cortex/config.toml` - Fallback location
+
+**Useful commands**:
+```bash
+# Initialize config in XDG directory (recommended for system-wide use)
+pcortex config --init
+
+# Create sample config in current directory (for project-specific config)
+pcortex config --sample
+
+# Show all config search paths
+pcortex config --show-paths
 ```
 
 ## Configuration

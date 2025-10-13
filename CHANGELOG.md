@@ -5,7 +5,18 @@ All notable changes to Prometh Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2025-11-05
+
+### Added
+- XDG Base Directory Specification support for config file locations
+- `pcortex config --init` command to initialize user config directory
+- `pcortex config --show-paths` command to display config search paths
+- Config file search now includes `~/.config/prometh-cortex/config.toml` (XDG standard)
+
+### Changed
+- Improved config file discovery with XDG-compliant paths
+- Enhanced `pcortex config` command with multiple options
+- Updated Quick Start guide in README with better installation instructions
 
 ## [0.1.1] - 2025-10-12
 
