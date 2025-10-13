@@ -55,16 +55,20 @@ def display_welcome():
 
 @click.group(name="pcortex")
 @click.option(
-    "--config", 
+    "--config",
     "-c",
     type=click.Path(exists=True, path_type=Path),
     help="Path to configuration file (config.toml)"
 )
 @click.option(
-    "--verbose", 
-    "-v", 
-    is_flag=True, 
+    "--verbose",
+    "-v",
+    is_flag=True,
     help="Enable verbose output"
+)
+@click.version_option(
+    package_name="prometh-cortex",
+    prog_name="pcortex"
 )
 @click.pass_context
 def cli(ctx: click.Context, config: Optional[Path], verbose: bool):
@@ -80,11 +84,18 @@ def cli(ctx: click.Context, config: Optional[Path], verbose: bool):
     # Store global options in context
     ctx.obj["verbose"] = verbose
     ctx.obj["config_file"] = config
-    
+
     if verbose:
         display_welcome()
-    
-    # Load and validate configuration
+
+    # Skip config loading for config management commands
+    # These commands don't need a valid config to run
+    config_commands = ["config"]
+    if ctx.invoked_subcommand in config_commands:
+        ctx.obj["config"] = None
+        return
+
+    # Load and validate configuration for other commands
     try:
         ctx.obj["config"] = load_config(config)
         if verbose:
@@ -92,8 +103,7 @@ def cli(ctx: click.Context, config: Optional[Path], verbose: bool):
             console.print(f"[dim]Datalake repos: {len(ctx.obj['config'].datalake_repos)} configured[/dim]")
     except ConfigValidationError as e:
         console.print(f"[red]✗[/red] Configuration error: {e}")
-        if verbose:
-            console.print("\n[yellow]Tip:[/yellow] Create config.toml by copying from config.toml.sample")
+        console.print("\n[yellow]Tip:[/yellow] Run 'pcortex config --init' to create a config file")
         sys.exit(1)
     except Exception as e:
         console.print(f"[red]✗[/red] Unexpected error loading configuration: {e}")
