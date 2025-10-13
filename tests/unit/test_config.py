@@ -61,20 +61,18 @@ class TestConfig:
         assert config.chunk_size == 512
         assert config.chunk_overlap == 50
     
-    def test_load_config_from_env_file(self, tmp_path):
-        """Test loading configuration from .env file."""
+    def test_load_config_from_env_file(self, tmp_path, monkeypatch):
+        """Test loading configuration from environment variables."""
         notes_dir = tmp_path / "notes"
         notes_dir.mkdir()
-        
-        env_file = tmp_path / ".env"
-        env_file.write_text(f"""
-DATALAKE_REPOS={notes_dir}
-MCP_PORT=9000
-EMBEDDING_MODEL=test-model
-""")
-        
-        config = load_config(env_file)
-        
+
+        # Set environment variables directly (not using .env file)
+        monkeypatch.setenv("DATALAKE_REPOS", str(notes_dir))
+        monkeypatch.setenv("MCP_PORT", "9000")
+        monkeypatch.setenv("EMBEDDING_MODEL", "test-model")
+
+        config = load_config()
+
         assert config.mcp_port == 9000
         assert config.embedding_model == "test-model"
         assert notes_dir in config.datalake_repos

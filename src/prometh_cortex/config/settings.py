@@ -266,10 +266,14 @@ def _load_from_toml(config_file: Optional[Path] = None) -> Config:
     """Load configuration from TOML file."""
     # Search for config.toml file if not provided
     if config_file is None:
+        # Follow XDG Base Directory Specification
+        xdg_config_home = os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+
         search_paths = [
-            Path.cwd() / "config.toml",  # Current working directory
-            Path.home() / "config.toml",  # User home directory
-            Path(__file__).parent.parent.parent / "config.toml",  # Project root (3 levels up from this file)
+            Path.cwd() / "config.toml",  # Current working directory (highest priority)
+            Path(xdg_config_home) / "prometh-cortex" / "config.toml",  # XDG config directory
+            Path.home() / ".prometh-cortex" / "config.toml",  # Fallback: hidden directory in home
+            Path(__file__).parent.parent.parent / "config.toml",  # Project root (development only)
         ]
         
         config_file = None

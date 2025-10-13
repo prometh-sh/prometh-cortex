@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- XDG Base Directory Specification support for config file locations
+- `pcortex config --init` command to initialize user config directory
+- `pcortex config --show-paths` command to display config search paths
+- Config file search now includes `~/.config/prometh-cortex/config.toml` (XDG standard)
+
+### Changed
+- Improved config file discovery with XDG-compliant paths
+- Enhanced `pcortex config` command with multiple options
+- Updated Quick Start guide in README with better installation instructions
+
 ## [0.1.1] - 2025-10-12
 
 ### Added
