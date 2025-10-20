@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from prometh_cortex.config import ConfigValidationError, load_config
-from prometh_cortex.cli.commands import build, rebuild, query, serve, mcp, health, fields
+from prometh_cortex.cli.commands import build, rebuild, query, serve, mcp, health, fields, collections
 
 
 console = Console()
@@ -100,7 +100,7 @@ def cli(ctx: click.Context, config: Optional[Path], verbose: bool):
         ctx.obj["config"] = load_config(config)
         if verbose:
             console.print(f"[green]✓[/green] Configuration loaded successfully")
-            console.print(f"[dim]Datalake repos: {len(ctx.obj['config'].datalake_repos)} configured[/dim]")
+            console.print(f"[dim]Collections: {len(ctx.obj['config'].collections)} configured[/dim]")
     except ConfigValidationError as e:
         console.print(f"[red]✗[/red] Configuration error: {e}")
         console.print("\n[yellow]Tip:[/yellow] Run 'pcortex config --init' to create a config file")
@@ -198,8 +198,9 @@ def config(sample: bool, init: bool, show_paths: bool):
 
 # Add command groups
 cli.add_command(build.build)
-cli.add_command(rebuild.rebuild) 
+cli.add_command(rebuild.rebuild)
 cli.add_command(query.query)
+cli.add_command(collections.collections)
 cli.add_command(serve.serve)
 cli.add_command(mcp.mcp)
 cli.add_command(health.health)

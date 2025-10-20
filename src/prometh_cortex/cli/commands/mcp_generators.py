@@ -281,14 +281,14 @@ Configuration Summary for {target.title()}:
 
 Pcortex Executable: {pcortex_path}
 Vector Store: {config.vector_store_type}
-Datalake Repos: {len(config.datalake_repos)} configured
+Collections: {len(config.collections)} configured
 MCP Server Command: pcortex mcp start
 
 Datalake Paths:
 """
     
-    for i, repo in enumerate(config.datalake_repos, 1):
-        summary += f"  {i}. {repo}\n"
+    for i, coll in enumerate(config.collections, 1):
+        summary += f"  {i}. {coll.name}\n"
     
     # Show a sample of the environment variables that will be set
     env_vars = config_to_env_vars(config)

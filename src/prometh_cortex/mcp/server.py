@@ -135,28 +135,32 @@ async def lazy_load_index():
 async def prometh_cortex_query(
     query: str,
     max_results: Optional[int] = None,
+    collection: Optional[str] = None,
     filters: Optional[Dict[str, Any]] = None,
     show_query_info: bool = False,
     include_full_content: bool = False
 ) -> Dict[str, Any]:
     """Query indexed documents with enhanced tag-based filtering and semantic search.
-    
+
+    Multi-collection support (v0.2.0+): Query specific collections or search all collections.
+
     RECOMMENDED: Use tags for precise filtering, semantic text for content matching.
-    
+
     Supported query formats:
     - Simple: "meeting notes discussion"
-    - Tag filters: "tags:work,urgent" or "tags:meetings|planning" or "tags:project+urgent"  
+    - Tag filters: "tags:work,urgent" or "tags:meetings|planning" or "tags:project+urgent"
     - Date filters: "created:2024-12-08" or "created:2024-12-01:2024-12-08"
     - Combined: "tags:meetings,work created:2024-12-08 discussion agenda"
     - Other fields: "author:john status:completed project update"
-    
+
     Args:
         query: The search query text (simple or structured)
         max_results: Maximum number of results to return (default: config value)
+        collection: Optional collection name to query (default: search all collections)
         filters: Optional additional filters (merged with parsed structured filters)
         show_query_info: Include query parsing information in response for debugging
         include_full_content: Load and include complete document content (not just chunks)
-    
+
     Returns:
         Dictionary containing query results, timing, metadata, and optionally full document content
     """
@@ -165,30 +169,40 @@ async def prometh_cortex_query(
         indexer = await lazy_load_index()
         if not indexer:
             return {"error": "Indexer not initialized"}
-        
+
         start_time = time.time()
-        
+
         # Determine max results
         if max_results is None:
             max_results = config.max_query_results
-        
+
+        # Validate collection if specified
+        if collection:
+            valid_collections = [c.name for c in config.collections]
+            if collection not in valid_collections:
+                return {
+                    "error": f"Collection '{collection}' not found",
+                    "available_collections": valid_collections
+                }
+
         # Convert legacy filters to vector store filters and apply vector-level filtering
         vector_store_filters = {}
         post_process_filters = {}
-        
+
         if filters:
             # Separate filters that can be applied at vector store level vs post-processing
             for key, value in filters.items():
-                if key in ["datalake", "tags"]:
+                if key in ["datalake", "tags", "collection"]:
                     # These need post-processing due to complex logic
                     post_process_filters[key] = value
                 else:
                     # Direct metadata filters can be handled by vector store
                     vector_store_filters[key] = value
-        
-        # Perform query with vector store filters
+
+        # Perform query with optional collection filtering
         results = indexer.query(
-            query, 
+            query,
+            collection=collection,
             max_results=max_results * 2 if post_process_filters else max_results,  # Get more if post-filtering
             filters=vector_store_filters if vector_store_filters else None
         )
@@ -360,22 +374,69 @@ async def prometh_cortex_query(
 
 
 @mcp.tool()
+async def prometh_cortex_list_collections() -> Dict[str, Any]:
+    """List all available RAG collections and their metadata.
+
+    Multi-collection support (v0.2.0+): Get information about all configured collections
+    including document counts, chunking parameters, and source patterns.
+
+    Returns:
+        Dictionary containing list of collections with metadata
+    """
+    try:
+        # Lazy load index to get statistics
+        indexer_instance = await lazy_load_index()
+        if not indexer_instance:
+            return {
+                "error": "Indexer not initialized",
+                "collections": [c.name for c in config.collections] if config else []
+            }
+
+        # Get collection information
+        collections_list = indexer_instance.list_collections()
+
+        # Format response
+        response = {
+            "collections": collections_list,
+            "total_collections": len(collections_list),
+            "total_documents": sum(c.get("document_count", 0) for c in collections_list)
+        }
+
+        # Add collection names for quick reference
+        response["collection_names"] = [c["name"] for c in collections_list]
+
+        return response
+
+    except Exception as e:
+        logger.critical(f"List collections failed: {e}")
+        return {
+            "error": str(e),
+            "collections": [c.name for c in config.collections] if config else []
+        }
+
+
+@mcp.tool()
 async def prometh_cortex_health() -> Dict[str, Any]:
     """Get health status and statistics for the Prometh-Cortex system.
-    
+
     Returns:
         Dictionary containing health status, indexed files count, and system metrics
     """
     try:
         start_time = time.time()
-        
+
         # Basic health info
         health_info = {
             "status": "healthy",
             "embedding_model": config.embedding_model if config else "unknown",
             "vector_store_type": config.vector_store_type if config else "unknown"
         }
-        
+
+        # Multi-collection info
+        if config:
+            health_info["total_collections"] = len(config.collections)
+            health_info["collection_names"] = [c.name for c in config.collections]
+
         # Get indexer statistics if available
         try:
             # Try to lazy load index for health check
@@ -404,16 +465,14 @@ async def prometh_cortex_health() -> Dict[str, Any]:
                 "indexed_files": 0,
                 "index_stats": {"status": "index_loading_failed", "error": str(e)}
             })
-        
+
         # Add configuration info
         if config:
             config_info = {
-                "datalake_repos": [str(p) for p in config.datalake_repos],
-                "max_query_results": config.max_query_results,
-                "chunk_size": config.chunk_size,
-                "chunk_overlap": config.chunk_overlap
+                "total_collections": len(config.collections),
+                "max_query_results": config.max_query_results
             }
-            
+
             # Add vector store specific info
             if config.vector_store_type == 'faiss':
                 config_info["rag_index_dir"] = str(config.rag_index_dir)
@@ -424,15 +483,15 @@ async def prometh_cortex_health() -> Dict[str, Any]:
                     "qdrant_collection_name": config.qdrant_collection_name,
                     "qdrant_use_https": config.qdrant_use_https
                 })
-            
+
             health_info.update(config_info)
-        
+
         # Add timing
         health_check_time = (time.time() - start_time) * 1000
         health_info["health_check_time_ms"] = health_check_time
-        
+
         return health_info
-        
+
     except Exception as e:
         logger.critical(f"Health check failed: {e}")
         return {

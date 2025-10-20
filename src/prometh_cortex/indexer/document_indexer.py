@@ -1,25 +1,27 @@
-"""Document indexer with support for multiple vector stores."""
+"""Multi-collection document indexer for RAG operations (v0.2.0+)."""
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from copy import deepcopy
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-from prometh_cortex.config import Config
+from prometh_cortex.config import Config, CollectionConfig
+from prometh_cortex.router import DocumentRouter, RouterError
 from prometh_cortex.parser import (
-    MarkdownDocument, 
-    parse_markdown_file, 
+    MarkdownDocument,
+    parse_markdown_file,
     extract_document_chunks,
     QueryParser,
     ParsedQuery,
-    parse_query
 )
 from prometh_cortex.vector_store import (
     VectorStoreInterface,
     DocumentChange,
     DocumentChangeDetector,
-    create_vector_store
+    create_vector_store,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,496 +33,677 @@ class IndexerError(Exception):
 
 
 class DocumentIndexer:
-    """Document indexer for RAG operations with support for multiple vector stores."""
-    
+    """Multi-collection document indexer for RAG operations (v0.2.0+)."""
+
     def __init__(self, config: Config):
         """
-        Initialize document indexer.
-        
+        Initialize multi-collection document indexer.
+
         Args:
-            config: Configuration object with indexing settings
+            config: Configuration object with collection settings
+
+        Raises:
+            IndexerError: If initialization fails
         """
         self.config = config
         self.embed_model = None
-        self.vector_store: Optional[VectorStoreInterface] = None
-        self.change_detector: Optional[DocumentChangeDetector] = None
-        self.auto_discovered_fields: Optional[Set[str]] = None
+        self.router = None
+        self.collection_stores: Dict[str, VectorStoreInterface] = {}
+        self.change_detectors: Dict[str, DocumentChangeDetector] = {}
         self.query_parser = QueryParser(config=config)
-        
+        self.auto_discovered_fields: Optional[Set[str]] = None
+
         # Initialize components
         self._initialize_embedding_model()
-        self._initialize_vector_store()
-        self._initialize_change_detector()
-    
-    def _initialize_embedding_model(self):
+        self._initialize_router()
+        self._initialize_collections()
+
+    def _initialize_embedding_model(self) -> None:
         """Initialize the embedding model."""
         try:
-            self.embed_model = HuggingFaceEmbedding(model_name=self.config.embedding_model)
+            self.embed_model = HuggingFaceEmbedding(
+                model_name=self.config.embedding_model
+            )
+            logger.info(f"Embedding model initialized: {self.config.embedding_model}")
         except Exception as e:
-            raise IndexerError(f"Failed to initialize embedding model {self.config.embedding_model}: {e}")
-    
-    def _initialize_vector_store(self):
-        """Initialize the vector store based on configuration."""
+            raise IndexerError(
+                f"Failed to initialize embedding model {self.config.embedding_model}: {e}"
+            )
+
+    def _initialize_router(self) -> None:
+        """Initialize the document router."""
         try:
-            self.vector_store = create_vector_store(self.config, self.embed_model)
-            self.vector_store.initialize()
-        except Exception as e:
-            raise IndexerError(f"Failed to initialize vector store: {e}")
-    
-    def _initialize_change_detector(self):
-        """Initialize the change detector for incremental indexing."""
-        try:
-            # Use different metadata paths for different vector store types
-            if self.config.vector_store_type == 'faiss':
-                metadata_path = self.config.rag_index_dir / "change_metadata.json"
-            else:
-                # For Qdrant, store metadata in a separate directory
-                metadata_path = Path(f".prometh_cortex_{self.config.vector_store_type}") / "change_metadata.json"
-            
-            self.change_detector = DocumentChangeDetector(str(metadata_path))
-        except Exception as e:
-            raise IndexerError(f"Failed to initialize change detector: {e}")
-    
-    def discover_documents(self, datalake_paths: List[Path]) -> List[str]:
-        """Discover all Markdown documents in the specified datalake paths.
-        
+            self.router = DocumentRouter(self.config.collections)
+            logger.info(
+                f"Document router initialized with {len(self.config.collections)} collections"
+            )
+        except RouterError as e:
+            raise IndexerError(f"Failed to initialize router: {e}")
+
+    def _initialize_collections(self) -> None:
+        """Initialize vector stores for all collections."""
+        for collection_config in self.config.collections:
+            try:
+                # Create collection storage directory
+                storage_path = (
+                    self.config.rag_index_dir / "collections" / collection_config.name
+                )
+                storage_path.mkdir(parents=True, exist_ok=True)
+
+                # Create collection-specific config
+                collection_store_config = self._create_collection_config(collection_config)
+
+                # Initialize vector store
+                vector_store = create_vector_store(collection_store_config, self.embed_model)
+                vector_store.initialize()
+
+                self.collection_stores[collection_config.name] = vector_store
+
+                # Initialize change detector for collection
+                metadata_path = storage_path / "change_metadata.json"
+                self.change_detectors[collection_config.name] = DocumentChangeDetector(
+                    str(metadata_path)
+                )
+
+                logger.info(f"Initialized collection: {collection_config.name}")
+
+            except Exception as e:
+                raise IndexerError(f"Failed to initialize collection '{collection_config.name}': {e}")
+
+    def _create_collection_config(self, collection_config: CollectionConfig) -> Config:
+        """
+        Create a Config object for a specific collection.
+
         Args:
-            datalake_paths: List of paths to search for documents
-            
+            collection_config: Collection configuration
+
+        Returns:
+            Config object with collection-specific settings
+
+        Raises:
+            IndexerError: If config creation fails
+        """
+        try:
+            # Clone the main config
+            config_dict = self.config.dict()
+
+            # Override collection-specific settings
+            config_dict["chunk_size"] = collection_config.chunk_size
+            config_dict["chunk_overlap"] = collection_config.chunk_overlap
+
+            # Override storage path for collection
+            config_dict["rag_index_dir"] = (
+                self.config.rag_index_dir / "collections" / collection_config.name
+            )
+
+            # Create new Config object
+            collection_config_obj = Config(**config_dict)
+
+            return collection_config_obj
+
+        except Exception as e:
+            raise IndexerError(f"Failed to create collection config: {e}")
+
+    def discover_documents(self) -> List[str]:
+        """
+        Discover all Markdown documents from source patterns in collections.
+
+        Scans each collection's source_patterns directories for markdown files.
+
         Returns:
             List of document file paths
         """
         document_paths = []
-        for datalake_path in datalake_paths:
-            if datalake_path.exists() and datalake_path.is_dir():
-                # Find all markdown files recursively
-                markdown_files = list(datalake_path.rglob("*.md"))
+        discovered_patterns = set()
+
+        # Collect all unique source patterns from all collections
+        for collection in self.config.collections:
+            for pattern in collection.source_patterns:
+                if pattern != "*":  # Skip catch-all for now
+                    discovered_patterns.add(pattern)
+
+        # Scan each source pattern directory
+        for pattern in discovered_patterns:
+            pattern_path = Path(pattern)
+            if pattern_path.exists() and pattern_path.is_dir():
+                # Find all markdown files recursively in this pattern
+                markdown_files = list(pattern_path.rglob("*.md"))
                 document_paths.extend(str(f) for f in markdown_files)
-        
+            else:
+                logger.warning(f"Source pattern path does not exist: {pattern}")
+
+        if not document_paths:
+            logger.warning("No documents discovered from source patterns")
+
         return sorted(document_paths)
-    
-    def add_document(self, file_path: Path) -> bool:
+
+    def _route_documents(
+        self, document_paths: List[str]
+    ) -> Dict[str, List[str]]:
         """
-        Add a single document to the index.
-        
+        Route documents to their collections.
+
+        Args:
+            document_paths: List of document file paths
+
+        Returns:
+            Dictionary mapping collection names to list of document paths
+        """
+        routed = {coll.name: [] for coll in self.config.collections}
+
+        for doc_path in document_paths:
+            try:
+                collection = self.router.route_document(doc_path)
+                routed[collection].append(doc_path)
+            except RouterError as e:
+                logger.warning(f"Failed to route document {doc_path}: {e}")
+                # Default to "default" collection on routing failure
+                routed["default"].append(doc_path)
+
+        return routed
+
+    def add_document(self, file_path: Path, collection: str) -> bool:
+        """
+        Add a single document to a specific collection.
+
         Args:
             file_path: Path to markdown file to index
-            
+            collection: Target collection name
+
         Returns:
             True if successful, False otherwise
-            
+
         Raises:
-            IndexerError: If indexing fails
+            IndexerError: If document addition fails
         """
+        if collection not in self.collection_stores:
+            raise IndexerError(f"Collection '{collection}' not found")
+
         try:
             # Parse markdown document
             markdown_doc = parse_markdown_file(file_path)
-            
-            # Extract chunks for embedding
+
+            # Get collection-specific chunking config
+            collection_config = self.router.get_collection_config(collection)
+
+            # Extract chunks with collection-specific parameters
             chunks = extract_document_chunks(
-                markdown_doc, 
-                chunk_size=self.config.chunk_size,
-                chunk_overlap=self.config.chunk_overlap
+                markdown_doc,
+                chunk_size=collection_config.chunk_size,
+                chunk_overlap=collection_config.chunk_overlap,
             )
-            
+
             # Convert chunks to documents for vector store
             documents = []
             for chunk in chunks:
                 doc = {
-                    'id': f"{file_path}_{chunk['chunk_index']}",
-                    'text': chunk["content"],
-                    'metadata': {
+                    "id": f"{file_path}_{chunk['chunk_index']}",
+                    "text": chunk["content"],
+                    "metadata": {
                         **chunk["metadata"],
-                        'file_path': str(file_path),
-                        'chunk_index': chunk['chunk_index']
-                    }
+                        "file_path": str(file_path),
+                        "chunk_index": chunk["chunk_index"],
+                        "collection": collection,
+                        "chunk_config": {
+                            "chunk_size": collection_config.chunk_size,
+                            "chunk_overlap": collection_config.chunk_overlap,
+                        },
+                    },
                 }
                 documents.append(doc)
-            
-            # Add to vector store
-            self.vector_store.add_documents(documents)
-            
+
+            # Add to collection's vector store
+            vector_store = self.collection_stores[collection]
+            vector_store.add_documents(documents)
+
             return True
-            
+
         except Exception as e:
-            raise IndexerError(f"Failed to add document {file_path}: {e}")
-    
-    def add_documents(self, file_paths: List[Path]) -> Dict[str, int]:
-        """Add multiple documents to the index.
-        
-        Args:
-            file_paths: List of document file paths to index
-            
-        Returns:
-            Statistics dict with success/failure counts
+            raise IndexerError(f"Failed to add document {file_path} to collection '{collection}': {e}")
+
+    def add_documents(self, collection_docs: Dict[str, List[Path]]) -> Dict[str, Any]:
         """
-        stats = {'added': 0, 'failed': 0, 'errors': []}
-        
-        for file_path in file_paths:
-            try:
-                if self.add_document(file_path):
-                    stats['added'] += 1
-            except Exception as e:
-                stats['failed'] += 1
-                stats['errors'].append(f"{file_path}: {str(e)}")
-                logger.error(f"Failed to add document {file_path}: {e}")
-        
-        return stats
-    
-    def build_index(self, force_rebuild: bool = False) -> Dict[str, Any]:
-        """Build the complete index from all datalake repositories.
-        
+        Add multiple documents to their respective collections.
+
         Args:
-            force_rebuild: If True, rebuild entire index ignoring incremental changes
-            
+            collection_docs: Dictionary mapping collection names to list of document paths
+
         Returns:
-            Statistics dict with indexing results
+            Statistics dict with per-collection success/failure counts
+        """
+        stats = {"collections": {}, "total_added": 0, "total_failed": 0, "errors": []}
+
+        for collection_name, file_paths in collection_docs.items():
+            collection_stats = {"added": 0, "failed": 0, "errors": []}
+
+            for file_path in file_paths:
+                try:
+                    if self.add_document(Path(file_path), collection_name):
+                        collection_stats["added"] += 1
+                except Exception as e:
+                    collection_stats["failed"] += 1
+                    error_msg = f"{file_path}: {str(e)}"
+                    collection_stats["errors"].append(error_msg)
+                    stats["errors"].append(error_msg)
+                    logger.error(f"Failed to add document {file_path}: {e}")
+
+            stats["collections"][collection_name] = collection_stats
+            stats["total_added"] += collection_stats["added"]
+            stats["total_failed"] += collection_stats["failed"]
+
+        return stats
+
+    def build_index(self, force_rebuild: bool = False) -> Dict[str, Any]:
+        """
+        Build indexes for all collections.
+
+        Args:
+            force_rebuild: If True, rebuild entire indexes ignoring changes
+
+        Returns:
+            Statistics dict with per-collection results
         """
         try:
-            # Discover all documents
-            document_paths = self.discover_documents(self.config.datalake_repos)
-            
-            if force_rebuild:
-                # Force full rebuild
-                logger.info("Performing full index rebuild")
-                self.change_detector.reset()
-                self.vector_store.delete_collection()
-                self.vector_store.initialize()
+            # Discover all documents from collection source patterns
+            document_paths = self.discover_documents()
 
-                # Add all documents
-                stats = self.add_documents([Path(p) for p in document_paths])
+            if not document_paths:
+                logger.warning("No documents found from collection source patterns")
+                return {"message": "No documents found", "collections": {}}
 
-                # Update change detector metadata with proper hashes and mtimes
-                changes = []
-                for p in document_paths:
-                    import os
-                    if os.path.exists(p):
-                        changes.append(DocumentChange(
-                            file_path=p,
-                            change_type='add',
-                            file_hash=self.change_detector._compute_file_hash(p),
-                            modified_time=os.path.getmtime(p)
-                        ))
-                self.change_detector.update_metadata(changes)
-                
-            else:
-                # Incremental build
-                logger.info("Performing incremental index update")
-                changes = self.change_detector.detect_changes(document_paths)
-                
-                if not changes:
-                    logger.info("No changes detected, index is up to date")
-                    return {'message': 'No changes detected', 'changes': 0}
-                
-                logger.info(f"Detected {len(changes)} changes")
-                
-                # Apply incremental changes
-                vector_stats = self.vector_store.apply_incremental_changes(changes)
-                
-                # Process documents that need content updates (add/update)
-                docs_to_process = []
-                for change in changes:
-                    if change.change_type in ['add', 'update']:
-                        docs_to_process.append(Path(change.file_path))
-                
-                if docs_to_process:
-                    add_stats = self.add_documents(docs_to_process)
-                    vector_stats.update(add_stats)
-                
-                # Update change detector metadata
-                successful_changes = [
-                    change for change in changes 
-                    if change.change_type == 'delete' or 
-                    change.file_path not in [str(p) for p in docs_to_process if str(p) in [e.split(':')[0] for e in add_stats.get('errors', [])]]
-                ]
-                self.change_detector.update_metadata(successful_changes)
-                
-                stats = vector_stats
-            
-            # Save vector store if needed (for FAISS)
-            if hasattr(self.vector_store, 'save_index'):
-                self.vector_store.save_index()
-            
-            # Update auto-discovered fields after building
-            self.update_query_parser_fields()
-            
+            # Route documents to collections
+            routed_docs = self._route_documents(document_paths)
+
+            stats = {"collections": {}, "total_added": 0, "total_failed": 0}
+
+            # Build each collection
+            for collection_name, docs in routed_docs.items():
+                if not docs:
+                    logger.info(f"No documents for collection '{collection_name}'")
+                    stats["collections"][collection_name] = {"added": 0, "failed": 0}
+                    continue
+
+                try:
+                    collection_stats = self._build_collection(
+                        collection_name, docs, force_rebuild
+                    )
+                    stats["collections"][collection_name] = collection_stats
+                    stats["total_added"] += collection_stats.get("added", 0)
+                    stats["total_failed"] += collection_stats.get("failed", 0)
+
+                except Exception as e:
+                    logger.error(f"Failed to build collection '{collection_name}': {e}")
+                    stats["collections"][collection_name] = {"added": 0, "failed": len(docs), "error": str(e)}
+                    stats["total_failed"] += len(docs)
+
             logger.info(f"Index build completed: {stats}")
             return stats
-            
+
         except Exception as e:
-            raise IndexerError(f"Failed to build index: {e}")
-    
-    def load_index(self):
-        """Load existing index if needed (for FAISS compatibility)."""
-        try:
-            # Vector store is already initialized, but we can load persisted data
-            if hasattr(self.vector_store, 'load_index'):
-                self.vector_store.load_index()
-            
-            # Trigger auto-discovery of filterable fields after loading
-            self.update_query_parser_fields()
-            
-        except Exception as e:
-            # For new installations or Qdrant, this is not necessarily an error
-            logger.info(f"Could not load existing index: {e}")
-    
-    def query(self, query_text: str, max_results: Optional[int] = None, 
-             filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+            raise IndexerError(f"Failed to build indexes: {e}")
+
+    def _build_collection(
+        self, collection_name: str, docs: List[str], force: bool
+    ) -> Dict[str, Any]:
         """
-        Query the index for similar documents with support for structured queries.
-        
-        Supports both simple semantic queries and structured queries with metadata filters:
-        - Simple: "meeting notes discussion"
-        - Structured: "category:meetings created:2025-08-25 discussion agenda"
-        
+        Build index for a specific collection.
+
+        Args:
+            collection_name: Name of collection to build
+            docs: List of document paths for this collection
+            force: Force full rebuild
+
+        Returns:
+            Collection statistics
+        """
+        vector_store = self.collection_stores[collection_name]
+        change_detector = self.change_detectors[collection_name]
+
+        if force:
+            # Force full rebuild
+            logger.info(f"Performing full rebuild for collection '{collection_name}'")
+            change_detector.reset()
+            vector_store.delete_collection()
+            vector_store.initialize()
+
+            # Add all documents
+            add_stats = self.add_documents({collection_name: [Path(d) for d in docs]})
+
+            # Update change detector metadata
+            changes = []
+            for doc_path in docs:
+                if Path(doc_path).exists():
+                    import os
+                    changes.append(
+                        DocumentChange(
+                            file_path=doc_path,
+                            change_type="add",
+                            file_hash=change_detector._compute_file_hash(doc_path),
+                            modified_time=os.path.getmtime(doc_path),
+                        )
+                    )
+            change_detector.update_metadata(changes)
+
+            return add_stats["collections"][collection_name]
+
+        else:
+            # Incremental build
+            logger.info(f"Performing incremental update for collection '{collection_name}'")
+            changes = change_detector.detect_changes(docs)
+
+            if not changes:
+                logger.info(f"No changes detected for collection '{collection_name}'")
+                return {"added": 0, "failed": 0, "message": "No changes detected"}
+
+            logger.info(f"Detected {len(changes)} changes in collection '{collection_name}'")
+
+            # Apply incremental changes
+            vector_store.apply_incremental_changes(changes)
+
+            # Process documents that need content updates
+            docs_to_process = [
+                Path(c.file_path)
+                for c in changes
+                if c.change_type in ["add", "update"]
+            ]
+
+            add_stats = self.add_documents({collection_name: docs_to_process})
+
+            # Update change detector
+            successful_changes = [
+                c for c in changes
+                if c.change_type == "delete" or
+                str(c.file_path) not in [
+                    e.split(":")[0] for e in add_stats.get("errors", [])
+                ]
+            ]
+            change_detector.update_metadata(successful_changes)
+
+            return add_stats["collections"][collection_name]
+
+    def load_index(self) -> None:
+        """Load existing indexes for all collections."""
+        try:
+            for collection_name, vector_store in self.collection_stores.items():
+                try:
+                    if hasattr(vector_store, "load_index"):
+                        vector_store.load_index()
+                    logger.info(f"Loaded index for collection '{collection_name}'")
+                except Exception as e:
+                    logger.debug(f"Could not load index for collection '{collection_name}': {e}")
+
+            # Trigger auto-discovery of filterable fields
+            self.update_query_parser_fields()
+
+        except Exception as e:
+            logger.warning(f"Error during index loading: {e}")
+
+    def query(
+        self,
+        query_text: str,
+        collection: Optional[str] = None,
+        max_results: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query the indexes with optional collection filtering.
+
         Args:
             query_text: Query text (simple or structured)
+            collection: Specific collection name to query (None = all collections)
             max_results: Maximum number of results to return
-            filters: Optional metadata filters (merged with parsed filters)
-            
+            filters: Optional metadata filters
+
         Returns:
             List of result dictionaries with content, metadata, and scores
-            
+
         Raises:
             IndexerError: If querying fails
         """
-        if not self.vector_store:
-            raise IndexerError("Vector store not initialized.")
-        
+        if not self.collection_stores:
+            raise IndexerError("No collections initialized")
+
         if max_results is None:
             max_results = self.config.max_query_results
-        
+
         try:
-            # Parse structured query
-            parsed_query = self.query_parser.parse_query(query_text)
-            
-            # Build semantic query for vector search
-            semantic_query = self.query_parser.build_semantic_query(parsed_query)
-            
-            # Merge parsed metadata filters with provided filters
-            combined_filters = {}
-            post_processing_filters = {}
-            
-            if filters:
-                combined_filters.update(filters)
-            
-            if parsed_query.metadata_filters:
-                qdrant_filters = self.query_parser.convert_to_qdrant_filters(
-                    parsed_query.metadata_filters
-                )
-                combined_filters.update(qdrant_filters)
-                
-                # Extract date filters for post-processing
-                for field, value in parsed_query.metadata_filters.items():
-                    if field in ['created', 'modified']:
-                        post_processing_filters[field] = value
-            
-            # Generate query vector from semantic text
-            query_vector = self.embed_model.get_text_embedding(semantic_query)
-            
-            # Perform vector search with Qdrant-compatible filters
-            # Get more results if we need to post-filter
-            search_limit = max_results * 3 if post_processing_filters else max_results
-            
-            results = self.vector_store.query(
-                query_vector=query_vector,
-                top_k=search_limit,
-                filters=combined_filters if combined_filters else None
-            )
-            
-            # Apply post-processing filters (mainly for date filtering)
-            if post_processing_filters and results:
-                filtered_results = []
-                for result in results:
-                    include_result = True
-                    result_metadata = result.get('metadata', {})
-                    
-                    # Apply date filters
-                    for filter_field, filter_value in post_processing_filters.items():
-                        if filter_field in ['created', 'modified']:
-                            result_date_str = result_metadata.get(filter_field, '')
-                            if result_date_str:
-                                # Extract date part for comparison
-                                result_date = result_date_str.split('T')[0]
-                                
-                                if isinstance(filter_value, dict):
-                                    # Range filter
-                                    if 'gte' in filter_value:
-                                        filter_date = filter_value['gte'].split('T')[0]
-                                        if result_date < filter_date:
-                                            include_result = False
-                                            break
-                                    if 'lte' in filter_value:
-                                        filter_date = filter_value['lte'].split('T')[0]
-                                        if result_date > filter_date:
-                                            include_result = False
-                                            break
-                                else:
-                                    # Exact date match
-                                    filter_date = str(filter_value).split('T')[0]
-                                    if result_date != filter_date:
-                                        include_result = False
-                                        break
-                            else:
-                                # No date field in result
-                                include_result = False
-                                break
-                    
-                    if include_result:
-                        filtered_results.append(result)
-                
-                results = filtered_results[:max_results]
-            
-            # Add query metadata to results for debugging
-            if results and len(results) > 0 and isinstance(results[0], dict):
-                for result in results:
-                    if 'query_info' not in result:
-                        result['query_info'] = {
-                            'original_query': parsed_query.original_query,
-                            'semantic_query': semantic_query,
-                            'applied_filters': combined_filters,
-                            'parsed_filters': parsed_query.metadata_filters
-                        }
-            
-            return results
-            
+            if collection:
+                # Query specific collection
+                if collection not in self.collection_stores:
+                    raise IndexerError(f"Collection '{collection}' not found")
+                return self._query_collection(collection, query_text, max_results, filters)
+            else:
+                # Query all collections and merge results
+                return self._query_all_collections(query_text, max_results, filters)
+
         except Exception as e:
             raise IndexerError(f"Query failed: {e}")
-    
-    def query_by_text(self, query_text: str, max_results: Optional[int] = None,
-                     filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+
+    def _query_collection(
+        self,
+        collection: str,
+        query_text: str,
+        max_results: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Query a single collection."""
+        vector_store = self.collection_stores[collection]
+        collection_config = self.router.get_collection_config(collection)
+
+        # Parse structured query
+        parsed_query = self.query_parser.parse_query(query_text)
+
+        # Build semantic query
+        semantic_query = self.query_parser.build_semantic_query(parsed_query)
+
+        # Generate query vector
+        query_vector = self.embed_model.get_text_embedding(semantic_query)
+
+        # Merge filters
+        combined_filters = {}
+        if filters:
+            combined_filters.update(filters)
+        if parsed_query.metadata_filters:
+            qdrant_filters = self.query_parser.convert_to_qdrant_filters(
+                parsed_query.metadata_filters
+            )
+            combined_filters.update(qdrant_filters)
+
+        # Perform vector search
+        search_limit = max_results * 3 if parsed_query.metadata_filters else max_results
+        results = vector_store.query(
+            query_vector=query_vector,
+            top_k=search_limit,
+            filters=combined_filters if combined_filters else None,
+        )
+
+        # Add collection metadata to results
+        for result in results:
+            result["collection"] = collection
+            result["chunk_config"] = {
+                "chunk_size": collection_config.chunk_size,
+                "chunk_overlap": collection_config.chunk_overlap,
+            }
+
+        return results[:max_results]
+
+    def _query_all_collections(
+        self,
+        query_text: str,
+        max_results: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Query all collections and merge results by score."""
+        all_results = []
+
+        for collection_name in self.router.get_collection_names():
+            try:
+                collection_results = self._query_collection(
+                    collection_name, query_text, max_results * 2, filters
+                )
+                all_results.extend(collection_results)
+            except Exception as e:
+                logger.warning(f"Failed to query collection '{collection_name}': {e}")
+
+        # Sort by similarity score
+        all_results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
+
+        return all_results[:max_results]
+
+    def query_by_text(
+        self,
+        query_text: str,
+        collection: Optional[str] = None,
+        max_results: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """Convenience method that delegates to query."""
-        return self.query(query_text, max_results, filters)
-    
+        return self.query(query_text, collection, max_results, filters)
+
     def get_stats(self) -> Dict[str, Any]:
-        """
-        Get statistics about the index.
-        
-        Returns:
-            Dictionary with index statistics
-        """
-        base_stats = {
-            "vector_store_type": self.config.vector_store_type,
+        """Get statistics about all collections."""
+        stats = {
             "embedding_model": self.config.embedding_model,
-            "chunk_size": self.config.chunk_size,
-            "chunk_overlap": self.config.chunk_overlap,
+            "total_collections": len(self.collection_stores),
+            "collections": {},
         }
-        
-        # Get vector store stats
-        if self.vector_store:
-            vector_stats = self.vector_store.get_stats()
-            base_stats.update(vector_stats)
-        
-        # Get change detector stats
-        if self.change_detector:
-            change_stats = self.change_detector.get_stats()
-            base_stats.update(change_stats)
-        
-        return base_stats
-    
-    def auto_discover_filterable_fields(self, min_frequency: float = 0.1, sample_size: int = 50) -> Set[str]:
+
+        for collection_name, vector_store in self.collection_stores.items():
+            collection_config = self.router.get_collection_config(collection_name)
+            collection_stats = vector_store.get_stats()
+            collection_stats["chunk_size"] = collection_config.chunk_size
+            collection_stats["chunk_overlap"] = collection_config.chunk_overlap
+            stats["collections"][collection_name] = collection_stats
+
+        return stats
+
+    def list_collections(self) -> List[Dict[str, Any]]:
+        """List all collections with metadata."""
+        collections = []
+
+        for collection_config in self.config.collections:
+            metadata_path = (
+                self.config.rag_index_dir
+                / "collections"
+                / collection_config.name
+                / "metadata.json"
+            )
+
+            collection_info = {
+                "name": collection_config.name,
+                "chunk_size": collection_config.chunk_size,
+                "chunk_overlap": collection_config.chunk_overlap,
+                "source_patterns": collection_config.source_patterns,
+                "document_count": 0,
+                "last_updated": None,
+            }
+
+            # Try to load metadata if it exists
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path) as f:
+                        metadata = json.load(f)
+                        collection_info.update(metadata)
+                except Exception as e:
+                    logger.warning(f"Could not load metadata for collection '{collection_config.name}': {e}")
+
+            collections.append(collection_info)
+
+        return collections
+
+    def auto_discover_filterable_fields(
+        self, min_frequency: float = 0.1, sample_size: int = 50
+    ) -> Set[str]:
         """
         Auto-discover fields that are good candidates for structured query filtering.
-        
+
         Args:
             min_frequency: Minimum frequency (0.0-1.0) for a field to be considered
             sample_size: Number of documents to sample for analysis
-            
+
         Returns:
             Set of field names suitable for filtering
         """
-        if not self.vector_store:
-            return set()
-        
-        try:
-            # Get a larger sample for better field analysis
-            sample_results = self.vector_store.query(
-                query_vector=self.embed_model.get_text_embedding("sample documents"),
-                top_k=sample_size,
-                filters=None
-            )
-            
-            if not sample_results:
-                return set()
-            
-            # Analyze field frequency and types
-            field_stats = {}
-            total_docs = len(sample_results)
-            
-            for result in sample_results:
-                metadata = result.get('metadata', {})
-                
-                for field_name, field_value in metadata.items():
-                    # Skip internal fields
-                    if field_name in ['file_path', 'chunk_index']:
-                        continue
-                    
-                    if field_name not in field_stats:
-                        field_stats[field_name] = {
-                            'count': 0,
-                            'types': set(),
-                            'sample_values': set()
-                        }
-                    
-                    field_stats[field_name]['count'] += 1
-                    field_stats[field_name]['types'].add(type(field_value).__name__)
-                    
-                    # Collect sample values for analysis
-                    if len(field_stats[field_name]['sample_values']) < 5:
-                        if isinstance(field_value, (str, int, float)):
-                            field_stats[field_name]['sample_values'].add(str(field_value)[:50])
-                        elif isinstance(field_value, list):
-                            field_stats[field_name]['sample_values'].add(f"[{len(field_value)} items]")
-            
-            # Score fields for filtering suitability
-            filterable_fields = set()
-            
-            for field_name, stats in field_stats.items():
-                frequency = stats['count'] / total_docs
-                
-                # Must meet minimum frequency
-                if frequency < min_frequency:
+        # Collect fields from all collections
+        all_field_stats = {}
+
+        for collection_name, vector_store in self.collection_stores.items():
+            try:
+                if not vector_store:
                     continue
-                
-                # Score based on field characteristics
-                score = 0
-                
-                # High frequency is good
-                score += min(frequency, 1.0) * 10
-                
-                # Certain types are better for filtering
-                if 'str' in stats['types']:
-                    score += 5
-                if 'list' in stats['types']:
-                    score += 8  # Lists (like tags) are excellent for filtering
-                if 'int' in stats['types'] or 'float' in stats['types']:
-                    score += 3
-                
-                # Field name patterns indicate filtering suitability
-                field_lower = field_name.lower()
-                if any(pattern in field_lower for pattern in [
-                    'tag', 'category', 'status', 'type', 'author', 'owner', 'priority'
-                ]):
-                    score += 15
-                elif any(pattern in field_lower for pattern in [
-                    'subject', 'title', 'name', 'organizer', 'location', 'focus'
-                ]):
-                    score += 10
-                elif any(pattern in field_lower for pattern in [
-                    'event', 'project', 'reminder', 'list', 'duration'
-                ]):
-                    score += 8
-                
-                # If score is high enough, consider it filterable
-                if score >= 15:  # Threshold for auto-discovery
-                    filterable_fields.add(field_name)
-            
-            return filterable_fields
-            
-        except Exception as e:
-            logger.warning(f"Auto-discovery failed: {e}")
-            return set()
-    
+
+                # Get sample from this collection
+                sample_results = vector_store.query(
+                    query_vector=self.embed_model.get_text_embedding("sample"),
+                    top_k=sample_size,
+                    filters=None,
+                )
+
+                for result in sample_results:
+                    metadata = result.get("metadata", {})
+
+                    for field_name, field_value in metadata.items():
+                        if field_name in ["file_path", "chunk_index", "collection", "chunk_config"]:
+                            continue
+
+                        if field_name not in all_field_stats:
+                            all_field_stats[field_name] = {
+                                "count": 0,
+                                "types": set(),
+                                "sample_values": set(),
+                            }
+
+                        all_field_stats[field_name]["count"] += 1
+                        all_field_stats[field_name]["types"].add(type(field_value).__name__)
+
+                        if len(all_field_stats[field_name]["sample_values"]) < 5:
+                            if isinstance(field_value, (str, int, float)):
+                                all_field_stats[field_name]["sample_values"].add(
+                                    str(field_value)[:50]
+                                )
+                            elif isinstance(field_value, list):
+                                all_field_stats[field_name]["sample_values"].add(
+                                    f"[{len(field_value)} items]"
+                                )
+
+            except Exception as e:
+                logger.warning(f"Failed to auto-discover fields in collection '{collection_name}': {e}")
+
+        # Score fields
+        filterable_fields = set()
+        total_samples = len(self.collection_stores) * sample_size
+
+        for field_name, stats in all_field_stats.items():
+            frequency = stats["count"] / max(total_samples, 1)
+
+            if frequency < min_frequency:
+                continue
+
+            score = 0
+            score += min(frequency, 1.0) * 10
+
+            if "str" in stats["types"]:
+                score += 5
+            if "list" in stats["types"]:
+                score += 8
+            if "int" in stats["types"] or "float" in stats["types"]:
+                score += 3
+
+            field_lower = field_name.lower()
+            if any(pattern in field_lower for pattern in [
+                "tag", "category", "status", "type", "author", "owner", "priority"
+            ]):
+                score += 15
+            elif any(pattern in field_lower for pattern in [
+                "subject", "title", "name", "organizer", "location", "focus"
+            ]):
+                score += 10
+
+            if score >= 15:
+                filterable_fields.add(field_name)
+
+        return filterable_fields
+
     def update_query_parser_fields(self) -> None:
         """Update query parser with auto-discovered fields."""
         if self.config.structured_query_auto_discovery:
@@ -528,124 +711,50 @@ class DocumentIndexer:
             self.auto_discovered_fields = discovered
             self.query_parser.update_auto_discovered_fields(discovered)
             logger.info(f"Auto-discovered {len(discovered)} filterable fields: {sorted(discovered)}")
-    
-    def discover_available_fields(self, sample_size: int = 10) -> Dict[str, Any]:
-        """
-        Discover available metadata fields from indexed documents.
-        
-        Args:
-            sample_size: Number of documents to sample for field discovery
-            
-        Returns:
-            Dictionary with available fields and their sample values
-        """
-        if not self.vector_store:
-            raise IndexerError("Vector store not initialized.")
-        
+
+    def delete_index(self) -> None:
+        """Delete all collection indexes."""
         try:
-            # Get a sample of documents to analyze their metadata
-            sample_results = self.vector_store.query(
-                query_vector=self.embed_model.get_text_embedding("sample documents"),
-                top_k=sample_size,
-                filters=None
-            )
-            
-            # Analyze metadata fields
-            field_analysis = {}
-            
-            for result in sample_results:
-                metadata = result.get('metadata', {})
-                
-                for field_name, field_value in metadata.items():
-                    if field_name not in field_analysis:
-                        field_analysis[field_name] = {
-                            'type': type(field_value).__name__,
-                            'sample_values': set(),
-                            'count': 0
-                        }
-                    
-                    field_analysis[field_name]['count'] += 1
-                    
-                    # Collect sample values (limit to avoid memory issues)
-                    if len(field_analysis[field_name]['sample_values']) < 5:
-                        if isinstance(field_value, (list, dict)):
-                            field_analysis[field_name]['sample_values'].add(str(field_value)[:100])
-                        else:
-                            field_analysis[field_name]['sample_values'].add(str(field_value)[:100])
-            
-            # Convert sets to lists for JSON serialization
-            for field_info in field_analysis.values():
-                field_info['sample_values'] = list(field_info['sample_values'])
-                
-            # Add recommendations
-            recommendations = {
-                'recommended_for_filtering': [],
-                'recommended_for_tags': [],
-                'recommended_for_semantic': []
-            }
-            
-            for field_name, info in field_analysis.items():
-                # Tags and lists are great for filtering
-                if info['type'] == 'list' or field_name.lower() in ['tags', 'categories']:
-                    recommendations['recommended_for_filtering'].append(field_name)
-                    recommendations['recommended_for_tags'].append(field_name)
-                # Common categorical fields
-                elif field_name.lower() in ['category', 'author', 'status', 'focus']:
-                    recommendations['recommended_for_filtering'].append(field_name)
-                # Text fields better for semantic search
-                elif field_name.lower() in ['title', 'description', 'content']:
-                    recommendations['recommended_for_semantic'].append(field_name)
-            
-            return {
-                'fields': field_analysis,
-                'total_documents_sampled': len(sample_results),
-                'recommendations': recommendations,
-                'query_parser_config': {
-                    'core_fields': list(self.query_parser.config.structured_query_core_fields) if self.query_parser.config else [],
-                    'extended_fields': list(self.query_parser.config.structured_query_extended_fields) if self.query_parser.config else [],
-                    'auto_discovered_fields': list(self.auto_discovered_fields) if self.auto_discovered_fields else [],
-                    'all_available_fields': sorted(self.query_parser.available_fields),
-                    'auto_discovery_enabled': self.query_parser.config.structured_query_auto_discovery if self.query_parser.config else False
-                }
-            }
-            
+            for collection_name, vector_store in self.collection_stores.items():
+                if vector_store:
+                    vector_store.delete_collection()
+
+                # Reset change detector
+                if collection_name in self.change_detectors:
+                    self.change_detectors[collection_name].reset()
+
+            logger.info("All indexes deleted")
         except Exception as e:
-            raise IndexerError(f"Field discovery failed: {e}")
-    
-    def delete_index(self):
-        """Delete the entire index."""
+            raise IndexerError(f"Failed to delete indexes: {e}")
+
+    def backup_index(self, backup_path: str) -> None:
+        """Backup all collection indexes metadata."""
         try:
-            if self.vector_store:
-                self.vector_store.delete_collection()
-            if self.change_detector:
-                self.change_detector.reset()
+            for collection_name, vector_store in self.collection_stores.items():
+                if vector_store:
+                    vector_backup_path = f"{backup_path}_{collection_name}_vector_store.json"
+                    vector_store.backup_metadata(vector_backup_path)
+
+                if collection_name in self.change_detectors:
+                    change_backup_path = f"{backup_path}_{collection_name}_change_detector.json"
+                    self.change_detectors[collection_name].backup_metadata(change_backup_path)
+
+            logger.info("Indexes backed up")
         except Exception as e:
-            raise IndexerError(f"Failed to delete index: {e}")
-    
-    def backup_index(self, backup_path: str):
-        """Backup index metadata."""
+            raise IndexerError(f"Failed to backup indexes: {e}")
+
+    def restore_index(self, backup_path: str) -> None:
+        """Restore all collection indexes metadata."""
         try:
-            if self.vector_store:
-                vector_backup_path = f"{backup_path}_vector_store.json"
-                self.vector_store.backup_metadata(vector_backup_path)
-                
-            if self.change_detector:
-                change_backup_path = f"{backup_path}_change_detector.json"
-                self.change_detector.backup_metadata(change_backup_path)
-                
+            for collection_name, vector_store in self.collection_stores.items():
+                if vector_store:
+                    vector_backup_path = f"{backup_path}_{collection_name}_vector_store.json"
+                    vector_store.restore_metadata(vector_backup_path)
+
+                if collection_name in self.change_detectors:
+                    change_backup_path = f"{backup_path}_{collection_name}_change_detector.json"
+                    self.change_detectors[collection_name].restore_metadata(change_backup_path)
+
+            logger.info("Indexes restored")
         except Exception as e:
-            raise IndexerError(f"Failed to backup index: {e}")
-    
-    def restore_index(self, backup_path: str):
-        """Restore index from backup."""
-        try:
-            if self.vector_store:
-                vector_backup_path = f"{backup_path}_vector_store.json"
-                self.vector_store.restore_metadata(vector_backup_path)
-                
-            if self.change_detector:
-                change_backup_path = f"{backup_path}_change_detector.json"
-                self.change_detector.restore_metadata(change_backup_path)
-                
-        except Exception as e:
-            raise IndexerError(f"Failed to restore index: {e}")
+            raise IndexerError(f"Failed to restore indexes: {e}")

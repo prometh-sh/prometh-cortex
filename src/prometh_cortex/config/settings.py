@@ -1,6 +1,7 @@
 """Configuration settings and TOML configuration management."""
 
 import os
+import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -13,14 +14,35 @@ class ConfigValidationError(Exception):
     pass
 
 
+class CollectionConfig(BaseModel):
+    """Configuration for a RAG collection."""
+
+    name: str = Field(
+        ...,
+        description="Unique collection name"
+    )
+    chunk_size: int = Field(
+        default=512,
+        ge=128, le=2048,
+        description="Size of text chunks for this collection"
+    )
+    chunk_overlap: int = Field(
+        default=50,
+        ge=0, le=256,
+        description="Overlap between text chunks in this collection"
+    )
+    source_patterns: List[str] = Field(
+        default_factory=list,
+        description="Path patterns that route documents to this collection (e.g., ['docs/specs', 'docs/prds'])"
+    )
+
+    class Config:
+        """Pydantic configuration."""
+        arbitrary_types_allowed = True
+
+
 class Config(BaseModel):
     """Configuration settings for prometh-cortex."""
-    
-    # Required settings
-    datalake_repos: List[Path] = Field(
-        ..., 
-        description="List of datalake repository paths to index"
-    )
     
     # Optional settings with defaults
     rag_index_dir: Path = Field(
@@ -49,15 +71,18 @@ class Config(BaseModel):
         ge=1, le=100,
         description="Maximum number of results to return per query"
     )
-    chunk_size: int = Field(
-        default=512,
-        ge=128, le=2048,
-        description="Size of text chunks for embedding"
-    )
-    chunk_overlap: int = Field(
-        default=50,
-        ge=0, le=256,
-        description="Overlap between text chunks"
+
+    # Multi-collection configuration (v0.2.0+)
+    collections: List[CollectionConfig] = Field(
+        default_factory=lambda: [
+            CollectionConfig(
+                name="default",
+                chunk_size=512,
+                chunk_overlap=50,
+                source_patterns=["*"]
+            )
+        ],
+        description="RAG collection configurations with source routing patterns"
     )
     
     # Vector store configuration
@@ -167,48 +192,6 @@ class Config(BaseModel):
         env_prefix = ""
         case_sensitive = False
         
-    @validator("datalake_repos", pre=True)
-    def parse_datalake_repos(cls, v):
-        """Parse comma-separated datalake repository paths."""
-        if isinstance(v, str):
-            # If the string doesn't contain commas, treat it as a single path
-            if "," not in v:
-                paths = [v.strip()]
-            else:
-                # Handle quoted paths by using csv module for proper parsing
-                import csv
-                import io
-                
-                # Try CSV parsing first for quoted strings
-                try:
-                    csv_reader = csv.reader(io.StringIO(v))
-                    paths = next(csv_reader)
-                    paths = [path.strip() for path in paths if path.strip()]
-                except:
-                    # Fall back to simple comma splitting
-                    paths = [path.strip() for path in v.split(",") if path.strip()]
-            
-            return [Path(path).expanduser().resolve() for path in paths]
-        elif isinstance(v, list):
-            return [Path(path).expanduser().resolve() for path in v]
-        else:
-            raise ValueError("datalake_repos must be a string or list")
-    
-    @validator("datalake_repos")
-    def validate_datalake_repos(cls, v):
-        """Validate that datalake repository paths exist and are readable."""
-        if not v:
-            raise ValueError("At least one datalake repository path must be specified")
-        
-        for path in v:
-            if not path.exists():
-                raise ValueError(f"Datalake repository path does not exist: {path}")
-            if not path.is_dir():
-                raise ValueError(f"Datalake repository path is not a directory: {path}")
-            if not os.access(path, os.R_OK):
-                raise ValueError(f"Datalake repository path is not readable: {path}")
-        
-        return v
     
     @validator("rag_index_dir", pre=True)
     def resolve_rag_index_dir(cls, v):
@@ -237,6 +220,60 @@ class Config(BaseModel):
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes", "on")
         return bool(v)
+
+    @validator("collections", pre=True)
+    def parse_collections(cls, v):
+        """Parse collections from various formats."""
+        if isinstance(v, str):
+            # Parse JSON string
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [CollectionConfig(**c) for c in parsed]
+                else:
+                    raise ValueError("Collections must be a JSON array")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in collections configuration: {e}")
+        elif isinstance(v, list):
+            # Already a list, convert dicts to CollectionConfig
+            return [CollectionConfig(**c) if isinstance(c, dict) else c for c in v]
+        else:
+            raise ValueError("Collections must be a list or JSON string")
+
+    @validator("collections")
+    def validate_collections(cls, v):
+        """Validate collections configuration."""
+        if not v:
+            raise ValueError("At least one collection must be configured")
+
+        collection_names = set()
+        has_default = False
+        has_catchall = False
+
+        for collection in v:
+            # Check for duplicate names
+            if collection.name in collection_names:
+                raise ValueError(f"Duplicate collection name: {collection.name}")
+            collection_names.add(collection.name)
+
+            # Check for required patterns
+            if not collection.source_patterns:
+                raise ValueError(f"Collection '{collection.name}' must have at least one source pattern")
+
+            # Track default collection and catch-all pattern
+            if collection.name == "default":
+                has_default = True
+            if "*" in collection.source_patterns:
+                has_catchall = True
+
+        # Ensure we have a default collection with catch-all pattern
+        if not has_default:
+            raise ValueError("A collection named 'default' with source pattern '*' is required")
+
+        if not has_catchall:
+            raise ValueError("At least one collection must have '*' as a source pattern (catch-all)")
+
+        return v
 
 
 def load_config(config_file: Optional[Path] = None) -> Config:
@@ -310,10 +347,6 @@ def _load_from_env() -> Config:
     config_data = {}
     
     # Required settings
-    datalake_repos = os.getenv("DATALAKE_REPOS")
-    if datalake_repos:
-        config_data["datalake_repos"] = datalake_repos
-    
     # Optional settings
     if rag_index_dir := os.getenv("RAG_INDEX_DIR"):
         config_data["rag_index_dir"] = rag_index_dir
@@ -338,18 +371,41 @@ def _load_from_env() -> Config:
             config_data["max_query_results"] = int(max_query_results)
         except ValueError:
             raise ConfigValidationError(f"Invalid MAX_QUERY_RESULTS value: {max_query_results}")
-    
-    if chunk_size := os.getenv("CHUNK_SIZE"):
+
+    # Collections configuration (v0.2.0+)
+    if rag_collections := os.getenv("RAG_COLLECTIONS"):
         try:
-            config_data["chunk_size"] = int(chunk_size)
-        except ValueError:
-            raise ConfigValidationError(f"Invalid CHUNK_SIZE value: {chunk_size}")
-    
-    if chunk_overlap := os.getenv("CHUNK_OVERLAP"):
-        try:
-            config_data["chunk_overlap"] = int(chunk_overlap)
-        except ValueError:
-            raise ConfigValidationError(f"Invalid CHUNK_OVERLAP value: {chunk_overlap}")
+            # Try to parse as JSON first
+            collections = json.loads(rag_collections)
+            config_data["collections"] = collections
+        except json.JSONDecodeError:
+            # If not JSON, treat as simple collection names and create default config
+            # This allows: RAG_COLLECTIONS='knowledge_base,meetings,default'
+            collection_names = [name.strip() for name in rag_collections.split(",") if name.strip()]
+
+            # Ensure "default" collection exists
+            if "default" not in collection_names:
+                collection_names.append("default")
+
+            # Create simple default configurations
+            collections = []
+            for name in collection_names:
+                if name == "default":
+                    collections.append({
+                        "name": "default",
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": ["*"]
+                    })
+                else:
+                    collections.append({
+                        "name": name,
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": []  # Will need to be configured
+                    })
+
+            config_data["collections"] = collections
     
     # Vector store configuration
     if vector_store_type := os.getenv("VECTOR_STORE_TYPE"):
@@ -469,10 +525,6 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
     """
     env_vars = {}
     
-    # Datalake configuration
-    if config.datalake_repos:
-        env_vars["DATALAKE_REPOS"] = ",".join(str(repo) for repo in config.datalake_repos)
-    
     # Storage configuration
     if config.rag_index_dir:
         env_vars["RAG_INDEX_DIR"] = str(config.rag_index_dir)
@@ -490,10 +542,20 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
         env_vars["EMBEDDING_MODEL"] = config.embedding_model
     if config.max_query_results:
         env_vars["MAX_QUERY_RESULTS"] = str(config.max_query_results)
-    if config.chunk_size:
-        env_vars["CHUNK_SIZE"] = str(config.chunk_size)
-    if config.chunk_overlap:
-        env_vars["CHUNK_OVERLAP"] = str(config.chunk_overlap)
+
+    # Collections configuration (v0.2.0+)
+    if config.collections:
+        # Export as JSON for env variable
+        collections_list = [
+            {
+                "name": c.name,
+                "chunk_size": c.chunk_size,
+                "chunk_overlap": c.chunk_overlap,
+                "source_patterns": c.source_patterns
+            }
+            for c in config.collections
+        ]
+        env_vars["RAG_COLLECTIONS"] = json.dumps(collections_list)
     
     # Vector store configuration
     if config.vector_store_type:
@@ -562,12 +624,6 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     config_data = {}
     
-    # Datalake configuration
-    if "datalake" in toml_data:
-        datalake = toml_data["datalake"]
-        if "repos" in datalake:
-            config_data["datalake_repos"] = datalake["repos"]
-    
     # Storage configuration
     if "storage" in toml_data:
         storage = toml_data["storage"]
@@ -591,10 +647,11 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
             config_data["embedding_model"] = embedding["model"]
         if "max_query_results" in embedding:
             config_data["max_query_results"] = embedding["max_query_results"]
-        if "chunk_size" in embedding:
-            config_data["chunk_size"] = embedding["chunk_size"]
-        if "chunk_overlap" in embedding:
-            config_data["chunk_overlap"] = embedding["chunk_overlap"]
+
+    # Collections configuration (v0.2.0+)
+    if "collections" in toml_data:
+        # TOML array of tables format: [[collections]]
+        config_data["collections"] = toml_data["collections"]
     
     # Vector store configuration
     if "vector_store" in toml_data:
@@ -676,7 +733,7 @@ def create_sample_config_file(path: Path = Path("config.toml.sample")) -> None:
 # Add your document directories here - supports multiple paths
 repos = [
     "/path/to/your/notes",
-    "/path/to/your/documents", 
+    "/path/to/your/documents",
     "/path/to/your/projects"
 ]
 
@@ -691,11 +748,41 @@ host = "localhost"
 auth_token = "your-secure-token-here"
 
 [embedding]
-# Embedding model and chunking configuration
+# Embedding model and query configuration
 model = "sentence-transformers/all-MiniLM-L6-v2"
 max_query_results = 10
+
+# Collections Configuration (v0.2.0+)
+# Each collection manages documents with specific chunking parameters
+# Required: At least one collection named "default" with source_patterns = ["*"]
+
+[[collections]]
+# Default collection (catch-all for unmatched documents)
+name = "default"
 chunk_size = 512
 chunk_overlap = 50
+source_patterns = ["*"]
+
+# Example: Knowledge base collection for technical documentation
+[[collections]]
+name = "knowledge_base"
+chunk_size = 512
+chunk_overlap = 50
+source_patterns = ["docs/specs", "docs/prds"]
+
+# Example: Meetings collection with smaller chunks for context
+[[collections]]
+name = "meetings"
+chunk_size = 256
+chunk_overlap = 25
+source_patterns = ["meetings"]
+
+# Example: Activity logs collection for task-like documents
+[[collections]]
+name = "activity_logs"
+chunk_size = 128
+chunk_overlap = 10
+source_patterns = ["todos", "reminders"]
 
 [vector_store]
 # Vector store backend: "faiss" (local) or "qdrant" (scalable)

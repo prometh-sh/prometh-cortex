@@ -27,9 +27,13 @@ class QueryRequest(BaseModel):
     """Request model for RAG query endpoint."""
     query: str = Field(..., min_length=1, description="Search query text (simple or structured)")
     max_results: Optional[int] = Field(
-        default=None, 
+        default=None,
         ge=1, le=100,
         description="Maximum number of results to return"
+    )
+    collection: Optional[str] = Field(
+        default=None,
+        description="Optional collection name to query (default: search all collections)"
     )
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -162,8 +166,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     @app.post(
         "/prometh_cortex_query",
         response_model=QueryResponse,
-        summary="Query RAG Index with Structured Query Support",
-        description="Search indexed documents using semantic similarity with optional structured query filters"
+        summary="Query RAG Index with Multi-Collection Support",
+        description="Search indexed documents using semantic similarity with optional structured query filters and collection filtering"
     )
     async def query_rag_index(
         request: QueryRequest,
@@ -171,16 +175,26 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         indexer: DocumentIndexer = Depends(get_indexer),
         config: Config = Depends(get_current_config)
     ):
-        """Query the RAG index for similar documents with structured query support."""
+        """Query the RAG index for similar documents with multi-collection support."""
         try:
             start_time = time.time()
-            
+
             # Determine max results
             max_results = request.max_results or config.max_query_results
-            
-            # Perform query (indexer now handles structured query parsing)
+
+            # Validate collection if specified
+            if request.collection:
+                valid_collections = [c.name for c in config.collections]
+                if request.collection not in valid_collections:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Collection '{request.collection}' not found. Available: {valid_collections}"
+                    )
+
+            # Perform query with optional collection filtering (indexer now handles multi-collection)
             results = indexer.query(
-                request.query, 
+                request.query,
+                collection=request.collection,
                 max_results=max_results,
                 filters=request.filters  # Additional filters merged with parsed filters
             )
@@ -351,18 +365,53 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
-    
+
+    @app.get(
+        "/prometh_cortex_collections",
+        summary="List Collections",
+        description="Get list of all available RAG collections with metadata"
+    )
+    async def list_collections(
+        _: bool = Depends(verify_auth_token),
+        indexer: DocumentIndexer = Depends(get_indexer),
+        config: Config = Depends(get_current_config)
+    ):
+        """List all available RAG collections and their statistics."""
+        try:
+            # Get collection information from indexer
+            collections_list = indexer.list_collections()
+
+            # Format response
+            response = {
+                "collections": collections_list,
+                "total_collections": len(collections_list),
+                "total_documents": sum(c.get("document_count", 0) for c in collections_list),
+                "collection_names": [c["name"] for c in collections_list]
+            }
+
+            return response
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list collections: {e}")
+
     @app.get("/", summary="Root", description="API root endpoint")
     async def root():
         """Root endpoint with API information."""
         return {
             "name": "Prometh Cortex MCP Server",
-            "version": "0.1.0",
-            "description": "Multi-Datalake RAG Indexer with Local MCP Integration",
+            "version": "0.2.0",
+            "description": "Multi-Datalake RAG Indexer with Multi-Collection Support",
             "endpoints": {
-                "query": "/prometh_cortex_query",
+                "query": "/prometh_cortex_query (with optional 'collection' parameter for multi-collection support)",
+                "collections": "/prometh_cortex_collections",
                 "health": "/prometh_cortex_health",
                 "docs": "/docs"
+            },
+            "features": {
+                "multi_collection": True,
+                "collection_filtering": True,
+                "structured_queries": True,
+                "full_document_content": True
             },
             "status": "running",
             "timestamp": datetime.now().isoformat()
