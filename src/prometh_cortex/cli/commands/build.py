@@ -122,30 +122,51 @@ def build(ctx: click.Context, force: bool, incremental: bool):
         start_time = time.time()
         build_progress = ClaudeProgress.create_build_progress()
 
-        with Live(build_progress, console=console, refresh_per_second=10):
-            build_task = build_progress.add_task(
-                "[bold blue]Analyzing documents and routing to collections...[/bold blue]",
-                total=None,
-                status="🔍 Scanning"
-            )
+        # Dictionary to track per-collection progress tasks
+        collection_tasks = {}
 
+        def progress_callback(event_type: str, collection_name: str, data: dict):
+            """Callback to handle collection-level progress updates."""
+            if event_type == "start":
+                # Create a new task for this collection
+                doc_count = data.get("doc_count", 0)
+                task_id = build_progress.add_task(
+                    f"[bold blue]Building: {collection_name}[/bold blue] ({doc_count} docs)",
+                    total=None,
+                    status="🚀 Processing"
+                )
+                collection_tasks[collection_name] = task_id
+
+            elif event_type == "complete":
+                # Update task to show completion
+                if collection_name in collection_tasks:
+                    added = data.get("added", 0)
+                    failed = data.get("failed", 0)
+                    status_str = "✓" if failed == 0 else f"⚠ {failed} failed"
+                    build_progress.update(
+                        collection_tasks[collection_name],
+                        description=f"[bold green]✓ {collection_name}[/bold green] ({added} indexed)",
+                        status=f"✅ {status_str}"
+                    )
+
+            elif event_type == "error":
+                # Update task to show error
+                if collection_name in collection_tasks:
+                    error_msg = data.get("error", "Unknown error")
+                    build_progress.update(
+                        collection_tasks[collection_name],
+                        description=f"[bold red]✗ {collection_name}[/bold red]",
+                        status=f"❌ {error_msg[:30]}..."
+                    )
+
+        with Live(build_progress, console=console, refresh_per_second=10):
             # Override incremental setting if force is specified
             force_rebuild = force or (not incremental)
 
-            # Simulate multi-phase build process
-            build_progress.update(
-                build_task,
-                description="[bold blue]Building collection indexes...[/bold blue]",
-                status="🚀 Processing"
-            )
-
-            # Build all collections
-            stats = indexer.build_index(force_rebuild=force_rebuild)
-
-            build_progress.update(
-                build_task,
-                description="[bold green]✓ Index build complete[/bold green]",
-                status="✅ Done"
+            # Build all collections with progress callback
+            stats = indexer.build_index(
+                force_rebuild=force_rebuild,
+                progress_callback=progress_callback
             )
 
         # Phase 3: Beautiful results display with per-collection statistics

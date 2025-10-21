@@ -260,19 +260,6 @@ class Config(BaseModel):
             if not collection.source_patterns:
                 raise ValueError(f"Collection '{collection.name}' must have at least one source pattern")
 
-            # Track default collection and catch-all pattern
-            if collection.name == "default":
-                has_default = True
-            if "*" in collection.source_patterns:
-                has_catchall = True
-
-        # Ensure we have a default collection with catch-all pattern
-        if not has_default:
-            raise ValueError("A collection named 'default' with source pattern '*' is required")
-
-        if not has_catchall:
-            raise ValueError("At least one collection must have '*' as a source pattern (catch-all)")
-
         return v
 
 

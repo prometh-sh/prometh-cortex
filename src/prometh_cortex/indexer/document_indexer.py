@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Callable
 from copy import deepcopy
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -135,6 +135,13 @@ class DocumentIndexer:
             config_dict["rag_index_dir"] = (
                 self.config.rag_index_dir / "collections" / collection_config.name
             )
+
+            # Set unique collection name for vector stores
+            if self.config.vector_store_type == "qdrant":
+                config_dict["qdrant_collection_name"] = collection_config.name
+            elif self.config.vector_store_type == "faiss":
+                # FAISS uses filesystem paths, so collection name is handled by rag_index_dir
+                pass
 
             # Create new Config object
             collection_config_obj = Config(**config_dict)
@@ -293,12 +300,20 @@ class DocumentIndexer:
 
         return stats
 
-    def build_index(self, force_rebuild: bool = False) -> Dict[str, Any]:
+    def build_index(
+        self,
+        force_rebuild: bool = False,
+        progress_callback: Optional[Callable[[str, str, Any], None]] = None
+    ) -> Dict[str, Any]:
         """
         Build indexes for all collections.
 
         Args:
             force_rebuild: If True, rebuild entire indexes ignoring changes
+            progress_callback: Optional callback function to report progress.
+                             Signature: callback(event_type: str, collection_name: str, data: Any)
+                             event_type can be: "start", "complete", "error"
+                             Example: callback("start", "prmth_projects", {"doc_count": 20})
 
         Returns:
             Statistics dict with per-collection results
@@ -324,6 +339,10 @@ class DocumentIndexer:
                     continue
 
                 try:
+                    # Report start of collection build
+                    if progress_callback:
+                        progress_callback("start", collection_name, {"doc_count": len(docs)})
+
                     collection_stats = self._build_collection(
                         collection_name, docs, force_rebuild
                     )
@@ -331,10 +350,18 @@ class DocumentIndexer:
                     stats["total_added"] += collection_stats.get("added", 0)
                     stats["total_failed"] += collection_stats.get("failed", 0)
 
+                    # Report completion of collection build
+                    if progress_callback:
+                        progress_callback("complete", collection_name, collection_stats)
+
                 except Exception as e:
                     logger.error(f"Failed to build collection '{collection_name}': {e}")
                     stats["collections"][collection_name] = {"added": 0, "failed": len(docs), "error": str(e)}
                     stats["total_failed"] += len(docs)
+
+                    # Report error in collection build
+                    if progress_callback:
+                        progress_callback("error", collection_name, {"error": str(e)})
 
             logger.info(f"Index build completed: {stats}")
             return stats
