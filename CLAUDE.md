@@ -4,22 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Prometh-Cortex is a **fully implemented** local-first Multi-Collection RAG (Retrieval-Augmented Generation) Indexer with intelligent document routing and dual MCP/HTTP server integration (v0.2.0+). The system:
+Prometh-Cortex is a **fully implemented** local-first Unified Collection RAG (Retrieval-Augmented Generation) Indexer with per-source chunking, intelligent document routing, and dual MCP/HTTP server integration (v0.3.0+). The system:
 
-- **Automatically routes documents** from multiple datalake repositories to dedicated collections
-- **Applies collection-specific configurations**: Different chunk sizes, overlaps, and embeddings per collection
+- **Automatically routes documents** from multiple datalake repositories to configured sources
+- **Applies per-source chunking**: Different chunk sizes and overlaps per source in a unified index
+- **Enables unified semantic search**: Single query across all document types with optimal performance
 - **Provides dual access methods**: MCP protocol for Claude Desktop + HTTP REST API for Perplexity/VSCode/web
-- **Supports sophisticated querying**: Search specific collections or aggregate across all collections
+- **Preserves topic-based querying**: Find meetings, tasks, and specs together by topic in a single query
 
-## Architecture (v0.2.0+)
+## Architecture (v0.3.0+)
 
-The system implements a complete multi-collection pipeline:
+The system implements a unified collection with per-source chunking pipeline:
 
-1. **Configuration Layer**: TOML/environment-based with collection definitions
-2. **Document Router**: Intelligent pattern-based routing to collections
-3. **Per-Collection Indexing**: Independent LlamaIndex + FAISS instances per collection
-4. **Datalake Ingest & Parser**: YAML frontmatter extraction with collection metadata
-5. **Query Engine**: Single or multi-collection search with result merging
+1. **Configuration Layer**: TOML/environment-based with single collection + multiple sources
+2. **Document Router**: Intelligent pattern-based routing to sources for chunking parameters
+3. **Unified Indexing**: Single LlamaIndex + FAISS instance with per-document metadata
+4. **Datalake Ingest & Parser**: YAML frontmatter extraction with source type metadata
+5. **Query Engine**: Single unified semantic search with optional source filtering
 6. **Dual Server Architecture**:
    - **MCP Protocol** (`pcortex mcp`): stdio-based for Claude Desktop integration
    - **HTTP REST API** (`pcortex serve`): FastAPI server for web/API integrations
@@ -30,56 +31,58 @@ The system implements a complete multi-collection pipeline:
 src/prometh_cortex/
 ├── cli/                    # CLI commands and main entry point
 │   ├── commands/
-│   │   ├── build.py       # Multi-collection index building
-│   │   ├── query.py       # Collection-aware querying
-│   │   ├── collections.py # NEW: Collection listing and management
+│   │   ├── build.py       # Unified index building with per-source chunking
+│   │   ├── query.py       # Unified query with optional source filtering
+│   │   ├── sources.py     # Source listing and management (renamed from collections.py)
 │   │   ├── mcp.py         # MCP server startup
 │   │   ├── rebuild.py     # Index rebuilding
 │   │   └── serve.py       # HTTP server startup
 │   └── main.py            # Main CLI entry point
 ├── config/
-│   └── settings.py        # Configuration with CollectionConfig (NEW)
-├── router/                # NEW: Document routing module
-│   └── __init__.py       # DocumentRouter implementation
+│   └── settings.py        # SourceConfig + CollectionConfig (unified architecture)
+├── router/                # Document routing for per-source chunking
+│   └── __init__.py       # DocumentRouter returns (source_name, chunk_size, chunk_overlap)
 ├── indexer/
-│   └── document_indexer.py # Rewritten for multi-collection (v0.2.0+)
+│   └── document_indexer.py # Refactored for unified collection (v0.3.0+)
 ├── parser/                # Markdown/YAML parsing
 ├── mcp/
-│   └── server.py         # Enhanced with collection support
+│   └── server.py         # MCP tools with source_type parameter
 ├── server/
-│   └── app.py            # Enhanced HTTP API with collection endpoints
+│   └── app.py            # HTTP API with source_type parameter
 └── utils/                # Utility functions
 ```
 
 ## Current Implementation Status
 
-**✅ v0.2.0 - FULLY IMPLEMENTED AND PRODUCTION-READY:**
+**✅ v0.3.0 - FULLY IMPLEMENTED AND PRODUCTION-READY:**
 
-### Core Features (Phase 1-3 Complete)
-- ✅ **Multi-Collection Configuration**: CollectionConfig with validation
-- ✅ **Document Router**: Pattern-based intelligent routing to collections
-- ✅ **Multi-Collection Indexer**: Independent FAISS instances per collection
-- ✅ **Collection-Specific Chunking**: Per-collection chunk size and overlap
-- ✅ **Complete CLI Interface**: build, query, collections, rebuild commands
-- ✅ **Advanced Configuration**: TOML/env-based with multi-collection support
-- ✅ **YAML Frontmatter Parser**: Complex schemas with collection metadata
-- ✅ **Dual Server Architecture**: MCP protocol + HTTP REST API
-- ✅ **Collection Management**: List, query, and manage multiple collections
+### Core Features (All 7 Phases Complete)
+- ✅ **Unified Collection Architecture**: Single FAISS index for all documents
+- ✅ **Per-Source Chunking**: Different chunk sizes per source in unified index
+- ✅ **Document Router**: Pattern-based routing that returns chunking parameters
+- ✅ **Single Vector Store**: Unified LlamaIndex + FAISS instance with metadata filtering
+- ✅ **Source-Specific Configuration**: SourceConfig with validation for per-source chunking
+- ✅ **Complete CLI Interface**: build, query, sources (renamed from collections), rebuild commands
+- ✅ **Advanced Configuration**: TOML/env-based with unified collection + sources support
+- ✅ **YAML Frontmatter Parser**: Complex schemas with source type metadata
+- ✅ **Dual Server Architecture**: MCP protocol + HTTP REST API (both updated for v0.3.0)
+- ✅ **Source Management**: List, query, and manage document sources
 
-### Production Capabilities (v0.2.0+)
-- ✅ **Multi-Collection Indexing**: Automatic routing and independent indexes
-- ✅ **Collections Support**: Up to N configurable collections per deployment
-- ✅ **Fast Query Performance**: <300ms for single collection, <500ms for 3-5 collections
-- ✅ **Cross-Collection Search**: Intelligent result merging by similarity
+### Production Capabilities (v0.3.0+)
+- ✅ **Unified Indexing**: Single index with per-source chunking metadata
+- ✅ **Sources Support**: Multiple configurable sources per collection
+- ✅ **Fast Query Performance**: <300ms for unified queries (vs ~500ms for v0.2 multi-collection)
+- ✅ **Semantic Cross-Type Search**: Topic-based queries work across document types
+- ✅ **Source Filtering**: Optional `source_type` parameter for filtering results
 - ✅ **Robust Error Handling**: Comprehensive validation and error messages
 - ✅ **Authentication**: Bearer token auth on all HTTP and MCP tools
-- ✅ **Tested**: Unit tests, integration tests, and performance tests included
+- ✅ **Backward Compatible**: v0.2 RAG_COLLECTIONS env var automatically mapped to RAG_SOURCES
 
 ## Configuration
 
-The system uses TOML files or environment variables with multi-collection support:
+The system uses TOML files or environment variables with unified collection + sources support:
 
-### Multi-Collection Configuration (v0.2.0+)
+### Unified Collection Configuration (v0.3.0+)
 
 **TOML Format** (Recommended):
 ```toml
@@ -89,24 +92,34 @@ repos = ["/path/to/your/documents"]
 [storage]
 rag_index_dir = "/path/to/index/storage"
 
-# Define collections with different chunking parameters
+# Single unified collection
 [[collections]]
+name = "prometh_cortex"
+
+# Document sources with per-source chunking
+[[sources]]
 name = "default"
 chunk_size = 512
 chunk_overlap = 50
 source_patterns = ["*"]  # Catch-all
 
-[[collections]]
+[[sources]]
 name = "knowledge_base"
-chunk_size = 512
-chunk_overlap = 50
+chunk_size = 768
+chunk_overlap = 76
 source_patterns = ["docs/specs", "docs/prds"]
 
-[[collections]]
+[[sources]]
 name = "meetings"
-chunk_size = 256
-chunk_overlap = 25
+chunk_size = 512
+chunk_overlap = 51
 source_patterns = ["meetings"]
+
+[[sources]]
+name = "todos"
+chunk_size = 256
+chunk_overlap = 26
+source_patterns = ["todos", "reminders"]
 ```
 
 **Environment Variables**:
@@ -115,11 +128,12 @@ source_patterns = ["meetings"]
 export DATALAKE_REPOS='/path/to/your/documents'
 export RAG_INDEX_DIR='/path/to/index/storage'
 
-# Multi-collection configuration (JSON)
-export RAG_COLLECTIONS='[
+# Document sources configuration (JSON)
+export RAG_SOURCES='[
   {"name":"default","chunk_size":512,"chunk_overlap":50,"source_patterns":["*"]},
-  {"name":"knowledge_base","chunk_size":512,"chunk_overlap":50,"source_patterns":["docs/specs"]},
-  {"name":"meetings","chunk_size":256,"chunk_overlap":25,"source_patterns":["meetings"]}
+  {"name":"knowledge_base","chunk_size":768,"chunk_overlap":76,"source_patterns":["docs/specs","docs/prds"]},
+  {"name":"meetings","chunk_size":512,"chunk_overlap":51,"source_patterns":["meetings"]},
+  {"name":"todos","chunk_size":256,"chunk_overlap":26,"source_patterns":["todos","reminders"]}
 ]'
 
 # Server configuration
@@ -132,21 +146,26 @@ export EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 export MAX_QUERY_RESULTS=10
 ```
 
+**Backward Compatibility**:
+- v0.3.0 still supports the old `RAG_COLLECTIONS` env var (automatically mapped to `RAG_SOURCES`)
+- TOML files using `[[collections]]` must be updated to `[[sources]]` (see migration guide)
+
 ## Available CLI Commands
 
 ### Index Management
-- `pcortex build` - Build indexes for all collections from datalakes
-- `pcortex build --force` - Force rebuild all collections from scratch
+- `pcortex build` - Build unified index with per-source chunking from datalakes
+- `pcortex build --force` - Force rebuild unified index from scratch
 - `pcortex rebuild` - Alias for `build --force`
 
 ### Query Interface
-- `pcortex query "search text"` - Query all collections (default behavior)
-- `pcortex query "search text" --collection knowledge_base` - Query specific collection
-- `pcortex query "search text" -c meetings` - Shorthand for collection option
+- `pcortex query "search text"` - Query unified index (default behavior, all sources)
+- `pcortex query "search text" --source knowledge_base` - Filter results to specific source
+- `pcortex query "search text" -s meetings` - Shorthand for source option
+- `pcortex query "search text" --max-results 10` - Limit number of results
 
-### Collection Management
-- `pcortex collections` - List all available collections and statistics
-- `pcortex collections -v` - Detailed collection information (verbose)
+### Source Management
+- `pcortex sources` - List all available sources and their statistics (v0.3.0+, renamed from collections)
+- `pcortex sources -v` - Detailed source information including patterns and chunk sizes (verbose)
 
 ### Server Operations
 - `pcortex mcp` - Start MCP protocol server (for Claude Desktop)
@@ -160,24 +179,24 @@ export MAX_QUERY_RESULTS=10
 ## Integration Status
 
 ### MCP Integration (Claude Desktop)
-**Status: ✅ v0.2.0 - FULLY IMPLEMENTED WITH COLLECTION SUPPORT**
+**Status: ✅ v0.3.0 - FULLY IMPLEMENTED WITH PER-SOURCE CHUNKING SUPPORT**
 - **MCP Protocol Server**: Complete stdio-based implementation using FastMCP
 - **MCP Tools Available**:
-  - `prometh_cortex_query`: Search with optional collection parameter
-  - `prometh_cortex_list_collections`: NEW - List all collections
-  - `prometh_cortex_health`: System health with collection metrics
-- **Multi-Collection Support**: Query single collection or aggregate across all
-- **Configuration**: Ready for Claude Desktop integration
+  - `prometh_cortex_query`: Search unified index with optional `source_type` filter (v0.3.0+)
+  - `prometh_cortex_list_sources`: List all sources (v0.3.0+, renamed from list_collections)
+  - `prometh_cortex_health`: System health with unified collection + source metrics
+- **Unified Index Support**: Query all sources or filter by specific source
+- **Configuration**: Ready for Claude Desktop integration with v0.3.0
 
 ### HTTP REST API Integration
-**Status: ✅ v0.2.0 - FULLY IMPLEMENTED WITH COLLECTION SUPPORT**
-- **FastAPI Server**: Complete REST API with multi-collection support
+**Status: ✅ v0.3.0 - FULLY IMPLEMENTED WITH PER-SOURCE CHUNKING SUPPORT**
+- **FastAPI Server**: Complete REST API with unified collection support
 - **Endpoints Available**:
-  - `POST /prometh_cortex_query`: Search with optional collection parameter
-  - `GET /prometh_cortex_collections`: NEW - List collections and statistics
-  - `GET /prometh_cortex_health`: Health check with collection metrics
+  - `POST /prometh_cortex_query`: Search with optional `source_type` filter (v0.3.0+)
+  - `GET /prometh_cortex_sources`: List sources and statistics (v0.3.0+, renamed from collections)
+  - `GET /prometh_cortex_health`: Health check with unified collection metrics
   - `GET /`: API info with features and version
-- **Multi-Collection Support**: Filter by collection or search all
+- **Unified Index Support**: Query all sources or filter by source_type
 - **Authentication**: Bearer token protected on all endpoints
 - **CORS**: Configured for web/VSCode integration
 

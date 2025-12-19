@@ -31,9 +31,9 @@ class QueryRequest(BaseModel):
         ge=1, le=100,
         description="Maximum number of results to return"
     )
-    collection: Optional[str] = Field(
+    source_type: Optional[str] = Field(
         default=None,
-        description="Optional collection name to query (default: search all collections)"
+        description="Optional source type to filter by (default: search all sources)"
     )
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -166,8 +166,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     @app.post(
         "/prometh_cortex_query",
         response_model=QueryResponse,
-        summary="Query RAG Index with Multi-Collection Support",
-        description="Search indexed documents using semantic similarity with optional structured query filters and collection filtering"
+        summary="Query RAG Index with Per-Source Chunking",
+        description="Search indexed documents using semantic similarity with optional structured query filters and source type filtering"
     )
     async def query_rag_index(
         request: QueryRequest,
@@ -175,26 +175,26 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         indexer: DocumentIndexer = Depends(get_indexer),
         config: Config = Depends(get_current_config)
     ):
-        """Query the RAG index for similar documents with multi-collection support."""
+        """Query the RAG index for similar documents with per-source chunking."""
         try:
             start_time = time.time()
 
             # Determine max results
             max_results = request.max_results or config.max_query_results
 
-            # Validate collection if specified
-            if request.collection:
-                valid_collections = [c.name for c in config.collections]
-                if request.collection not in valid_collections:
+            # Validate source_type if specified
+            if request.source_type:
+                valid_sources = [s.name for s in config.sources]
+                if request.source_type not in valid_sources:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Collection '{request.collection}' not found. Available: {valid_collections}"
+                        detail=f"Source type '{request.source_type}' not found. Available: {valid_sources}"
                     )
 
-            # Perform query with optional collection filtering (indexer now handles multi-collection)
+            # Perform query with optional source_type filtering
             results = indexer.query(
                 request.query,
-                collection=request.collection,
+                source_type=request.source_type,
                 max_results=max_results,
                 filters=request.filters  # Additional filters merged with parsed filters
             )
@@ -367,49 +367,51 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
 
     @app.get(
-        "/prometh_cortex_collections",
-        summary="List Collections",
-        description="Get list of all available RAG collections with metadata"
+        "/prometh_cortex_sources",
+        summary="List Sources",
+        description="Get list of all available document sources with metadata"
     )
-    async def list_collections(
+    async def list_sources(
         _: bool = Depends(verify_auth_token),
         indexer: DocumentIndexer = Depends(get_indexer),
         config: Config = Depends(get_current_config)
     ):
-        """List all available RAG collections and their statistics."""
+        """List all available document sources and their statistics."""
         try:
-            # Get collection information from indexer
-            collections_list = indexer.list_collections()
+            # Get source information from indexer
+            sources_info = indexer.list_sources()
 
             # Format response
             response = {
-                "collections": collections_list,
-                "total_collections": len(collections_list),
-                "total_documents": sum(c.get("document_count", 0) for c in collections_list),
-                "collection_names": [c["name"] for c in collections_list]
+                "collection_name": sources_info.get("collection_name", "prometh_cortex"),
+                "sources": sources_info.get("sources", []),
+                "total_sources": sources_info.get("total_sources", 0),
+                "total_documents": sources_info.get("total_documents", 0),
+                "source_names": [s["name"] for s in sources_info.get("sources", [])]
             }
 
             return response
 
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to list collections: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to list sources: {e}")
 
     @app.get("/", summary="Root", description="API root endpoint")
     async def root():
         """Root endpoint with API information."""
         return {
             "name": "Prometh Cortex MCP Server",
-            "version": "0.2.0",
-            "description": "Multi-Datalake RAG Indexer with Multi-Collection Support",
+            "version": "0.3.0",
+            "description": "Multi-Datalake RAG Indexer with Unified Collection + Per-Source Chunking",
             "endpoints": {
-                "query": "/prometh_cortex_query (with optional 'collection' parameter for multi-collection support)",
-                "collections": "/prometh_cortex_collections",
+                "query": "/prometh_cortex_query (with optional 'source_type' parameter for source filtering)",
+                "sources": "/prometh_cortex_sources",
                 "health": "/prometh_cortex_health",
                 "docs": "/docs"
             },
             "features": {
-                "multi_collection": True,
-                "collection_filtering": True,
+                "unified_collection": True,
+                "per_source_chunking": True,
+                "source_filtering": True,
                 "structured_queries": True,
                 "full_document_content": True
             },

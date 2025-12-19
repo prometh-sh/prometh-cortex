@@ -1,4 +1,4 @@
-"""Build command for creating RAG indexes with multi-collection support."""
+"""Build command for creating RAG indexes with per-source chunking."""
 
 import sys
 import time
@@ -36,37 +36,37 @@ console = Console()
 )
 @click.pass_context
 def build(ctx: click.Context, force: bool, incremental: bool):
-    """Build RAG indexes for all collections from datalake repositories.
+    """Build unified RAG index from datalake repositories with per-source chunking.
 
     By default, uses incremental indexing to only process changed files.
     Use --force to rebuild the entire index from scratch.
 
-    Multi-collection support (v0.2.0+): Documents are automatically routed
-    to collections based on configured source patterns. Each collection
-    maintains independent indexes with optimized chunking parameters.
+    Per-source chunking (v0.3.0+): Documents are automatically routed
+    to sources based on configured source patterns. Each source has
+    optimized chunking parameters, all indexed into a single unified collection.
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
 
-    # Display beautiful header with collection info
+    # Display beautiful header with source info
     if verbose:
         header_text = Text()
         header_text.append("🔨 ", style="bold yellow")
-        header_text.append("Building RAG Indexes", style="bold blue")
+        header_text.append("Building Unified RAG Index", style="bold blue")
 
-        # Show collection configuration
-        collections_info = []
-        for coll in config.collections:
-            patterns_str = ", ".join(coll.source_patterns[:2])
-            if len(coll.source_patterns) > 2:
-                patterns_str += f", +{len(coll.source_patterns)-2} more"
-            collections_info.append(
-                f"[cyan]{coll.name}[/cyan]: chunk_size={coll.chunk_size}, patterns=[{patterns_str}]"
+        # Show source configuration
+        sources_info = []
+        for source in config.sources:
+            patterns_str = ", ".join(source.source_patterns[:2])
+            if len(source.source_patterns) > 2:
+                patterns_str += f", +{len(source.source_patterns)-2} more"
+            sources_info.append(
+                f"[cyan]{source.name}[/cyan]: chunk_size={source.chunk_size}, patterns=[{patterns_str}]"
             )
 
         config_content = (
-            f"[bold cyan]Collections ({len(config.collections)})[/bold cyan]:\n" +
-            "\n".join(f"  • {info}" for info in collections_info)
+            f"[bold cyan]Sources ({len(config.sources)})[/bold cyan]:\n" +
+            "\n".join(f"  • {info}" for info in sources_info)
         )
         
         config_info = []
@@ -104,58 +104,58 @@ def build(ctx: click.Context, force: bool, incremental: bool):
 
         with Live(progress, console=console, refresh_per_second=10):
             init_task = progress.add_task(
-                f"[bold blue]Initializing {len(config.collections)} collections...[/bold blue]",
+                f"[bold blue]Initializing unified collection with {len(config.sources)} sources...[/bold blue]",
                 total=None
             )
 
             indexer = DocumentIndexer(config)
-            progress.update(init_task, description="[bold green]✓ Collections initialized[/bold green]")
+            progress.update(init_task, description="[bold green]✓ Unified collection initialized[/bold green]")
             time.sleep(0.3)  # Let user see the success
 
         console.print(ClaudeStatusDisplay.create_success_panel(
-            "Multi-Collection Indexer Ready",
-            f"Initialized {len(config.collections)} collections with {config.vector_store_type.upper()}"
+            "Unified RAG Indexer Ready",
+            f"Initialized {len(config.sources)} sources with {config.vector_store_type.upper()}"
         ))
         console.print()
 
-        # Phase 2: Build indexes with beautiful multi-phase progress
+        # Phase 2: Build index with beautiful multi-phase progress
         start_time = time.time()
         build_progress = ClaudeProgress.create_build_progress()
 
-        # Dictionary to track per-collection progress tasks
-        collection_tasks = {}
+        # Dictionary to track per-source progress tasks
+        source_tasks = {}
 
-        def progress_callback(event_type: str, collection_name: str, data: dict):
-            """Callback to handle collection-level progress updates."""
+        def progress_callback(event_type: str, source_name: str, data: dict):
+            """Callback to handle source-level progress updates."""
             if event_type == "start":
-                # Create a new task for this collection
+                # Create a new task for this source
                 doc_count = data.get("doc_count", 0)
                 task_id = build_progress.add_task(
-                    f"[bold blue]Building: {collection_name}[/bold blue] ({doc_count} docs)",
+                    f"[bold blue]Indexing: {source_name}[/bold blue] ({doc_count} docs)",
                     total=None,
                     status="🚀 Processing"
                 )
-                collection_tasks[collection_name] = task_id
+                source_tasks[source_name] = task_id
 
             elif event_type == "complete":
                 # Update task to show completion
-                if collection_name in collection_tasks:
-                    added = data.get("added", 0)
-                    failed = data.get("failed", 0)
-                    status_str = "✓" if failed == 0 else f"⚠ {failed} failed"
+                if source_name in source_tasks:
+                    documents = data.get("documents", 0)
+                    chunks = data.get("chunks", 0)
+                    status_str = f"✓ {chunks} chunks" if chunks > 0 else "✓"
                     build_progress.update(
-                        collection_tasks[collection_name],
-                        description=f"[bold green]✓ {collection_name}[/bold green] ({added} indexed)",
+                        source_tasks[source_name],
+                        description=f"[bold green]✓ {source_name}[/bold green] ({documents} docs)",
                         status=f"✅ {status_str}"
                     )
 
             elif event_type == "error":
                 # Update task to show error
-                if collection_name in collection_tasks:
+                if source_name in source_tasks:
                     error_msg = data.get("error", "Unknown error")
                     build_progress.update(
-                        collection_tasks[collection_name],
-                        description=f"[bold red]✗ {collection_name}[/bold red]",
+                        source_tasks[source_name],
+                        description=f"[bold red]✗ {source_name}[/bold red]",
                         status=f"❌ {error_msg[:30]}..."
                     )
 
@@ -180,61 +180,58 @@ def build(ctx: click.Context, force: bool, incremental: bool):
                 "No markdown files found in datalake repositories\nCheck your DATALAKE_REPOS paths"
             ))
         elif all(
-            stats.get("collections", {}).get(c, {}).get("added", 0) == 0
-            and stats.get("collections", {}).get(c, {}).get("failed", 0) == 0
-            for c in stats.get("collections", {})
+            stats.get("sources", {}).get(s, {}).get("documents", 0) == 0
+            for s in stats.get("sources", {})
         ):
-            # No changes detected in any collection
+            # No changes detected in any source
             console.print(ClaudeStatusDisplay.create_info_panel(
-                "All Collections Up to Date",
-                f"No changes detected in any collection\nCompleted in {build_time:.1f}s"
+                "Index Already Up to Date",
+                f"No changes detected in any source\nCompleted in {build_time:.1f}s"
             ))
         else:
             # Build completed - show success with celebration
             ClaudeAnimator.celebration_effect(console, "Index Build Complete!")
 
-            # Create per-collection statistics table
-            if len(config.collections) > 1 or verbose:
+            # Create per-source statistics table
+            if len(config.sources) > 1 or verbose:
                 console.print()
-                console.print("[bold cyan]📊 Per-Collection Statistics:[/bold cyan]")
+                console.print("[bold cyan]📊 Per-Source Statistics:[/bold cyan]")
                 console.print()
 
                 table = Table(show_header=True, header_style="bold blue", border_style="blue")
-                table.add_column("Collection", style="cyan")
-                table.add_column("Added", style="green")
-                table.add_column("Failed", style="red")
+                table.add_column("Source", style="cyan")
+                table.add_column("Documents", style="green")
+                table.add_column("Chunks", style="yellow")
                 table.add_column("Status", style="yellow")
 
-                for coll_name, coll_stats in stats.get("collections", {}).items():
-                    added = coll_stats.get("added", 0)
-                    failed = coll_stats.get("failed", 0)
-                    status = "✓" if failed == 0 else f"⚠ {failed} failed"
+                for source_name, source_stats in stats.get("sources", {}).items():
+                    documents = source_stats.get("documents", 0)
+                    chunks = source_stats.get("chunks", 0)
+                    status = "✓" if documents > 0 else "—"
 
-                    table.add_row(coll_name, str(added), str(failed), status)
+                    table.add_row(source_name, str(documents), str(chunks), status)
 
                 console.print(table)
                 console.print()
 
             # Overall statistics
-            total_added = stats.get("total_added", 0)
-            total_failed = stats.get("total_failed", 0)
+            total_documents = stats.get("total_documents", 0)
+            total_chunks = stats.get("total_chunks", 0)
 
             build_stats = {
-                "Total Documents Indexed": total_added,
+                "Total Documents Indexed": total_documents,
+                "Total Chunks Created": total_chunks,
                 "Build Time": f"{build_time:.1f}s",
             }
 
-            if total_failed > 0:
-                build_stats["Failed Documents"] = total_failed
-
             console.print(ClaudeStatusDisplay.create_success_panel(
                 "Build Successful",
-                f"Successfully indexed documents across {len(config.collections)} collections",
+                f"Successfully indexed documents from {len(config.sources)} sources into unified collection",
                 build_stats
             ))
 
-            # Show errors if any
-            if verbose and total_failed > 0 and stats.get("errors"):
+            # Show errors if any (only if there are actual errors in stats)
+            if verbose and stats.get("errors"):
                 error_list = []
                 for error in stats["errors"][:5]:  # Show first 5 errors
                     error_list.append(error.split(":")[0] if ":" in error else error)
@@ -243,25 +240,25 @@ def build(ctx: click.Context, force: bool, incremental: bool):
 
                 console.print(ClaudeStatusDisplay.create_error_panel(
                     "Processing Errors",
-                    f"{total_failed} documents failed to process",
+                    f"{len(stats.get('errors', []))} errors occurred during indexing",
                     error_list
                 ))
 
         # Storage information panel
         storage_info = {}
         if config.vector_store_type == 'faiss':
-            storage_info["Storage"] = f"Local FAISS ({config.rag_index_dir}/collections/)"
+            storage_info["Storage"] = f"Local FAISS ({config.rag_index_dir})"
         else:
             storage_info["Storage"] = f"Qdrant ({config.qdrant_host}:{config.qdrant_port})"
 
-        storage_info["Collections"] = len(config.collections)
+        storage_info["Collection"] = config.collection.name
+        storage_info["Sources"] = len(config.sources)
         storage_info["Embedding Model"] = config.embedding_model.split("/")[-1]
 
         # Get final statistics
         if verbose:
             index_stats = indexer.get_stats()
             storage_info["Vector Store"] = config.vector_store_type.upper()
-            storage_info["Total Collections"] = index_stats.get("total_collections", len(config.collections))
 
         console.print(ClaudeStatusDisplay.create_info_panel(
             "Index Statistics",
@@ -275,7 +272,7 @@ def build(ctx: click.Context, force: bool, incremental: bool):
             next_steps.append("Try: ", style="dim")
             next_steps.append("pcortex query 'your search'", style="bold cyan")
             next_steps.append(" or ", style="dim")
-            next_steps.append("pcortex collections", style="bold cyan")
+            next_steps.append("pcortex sources", style="bold cyan")
             console.print(next_steps)
     
     except KeyboardInterrupt:

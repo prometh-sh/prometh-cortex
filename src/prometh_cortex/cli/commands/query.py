@@ -40,26 +40,26 @@ console = Console()
     help="Show applied filters and query parsing information"
 )
 @click.option(
-    "--collection",
-    "-c",
-    help="Query specific collection (default: search all collections)"
+    "--source",
+    "-s",
+    help="Filter by specific source (default: search all sources)"
 )
 @click.pass_context
-def query(ctx: click.Context, search_term: str, max_results: int, show_content: bool, show_filters: bool, collection: str):
-    """Query the RAG index with optional collection filtering.
+def query(ctx: click.Context, search_term: str, max_results: int, show_content: bool, show_filters: bool, source: str):
+    """Query the unified RAG index with optional source filtering.
 
-    Multi-collection support (v0.2.0+): Search across all configured collections
-    or query a specific collection for more targeted results.
+    Per-source chunking (v0.3.0+): Search across all sources in the unified collection
+    or filter by a specific source for more targeted results.
 
     RECOMMENDED: Use tags for precise filtering, semantic text for content matching.
 
     Examples:
-      pcortex query "meeting notes"                           # Search all collections
-      pcortex query "agenda" --collection meetings            # Query specific collection
+      pcortex query "meeting notes"                           # Search all sources
+      pcortex query "agenda" --source meetings                # Filter by source
       pcortex query "tags:meetings,work discussion"          # Tag filter + semantic text
       pcortex query "created:2024-12-08 agenda"               # Date filtering
 
-    TIP: Run 'pcortex collections' to see available collections.
+    TIP: Run 'pcortex sources' to see available sources.
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
@@ -68,17 +68,17 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
     if max_results is None:
         max_results = config.max_query_results
 
-    # Validate collection if specified
-    if collection:
-        valid_collections = [c.name for c in config.collections]
-        if collection not in valid_collections:
+    # Validate source if specified
+    if source:
+        valid_sources = [s.name for s in config.sources]
+        if source not in valid_sources:
             suggestions = [
-                f"Available collections: {', '.join(valid_collections)}",
-                f"Run 'pcortex collections' to list all collections"
+                f"Available sources: {', '.join(valid_sources)}",
+                f"Run 'pcortex sources' to list all sources"
             ]
             console.print(ClaudeStatusDisplay.create_error_panel(
-                "Collection Not Found",
-                f"Collection '{collection}' does not exist",
+                "Source Not Found",
+                f"Source '{source}' does not exist",
                 suggestions
             ))
             sys.exit(1)
@@ -95,10 +95,10 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
             f"Vector Store: [bold cyan]{config.vector_store_type.upper()}[/bold cyan]",
         ]
 
-        if collection:
-            query_info.append(f"Collection: [bold yellow]{collection}[/bold yellow]")
+        if source:
+            query_info.append(f"Source Filter: [bold yellow]{source}[/bold yellow]")
         else:
-            query_info.append(f"Collections: [bold yellow]All ({len(config.collections)})[/bold yellow]")
+            query_info.append(f"Sources: [bold yellow]All ({len(config.sources)})[/bold yellow]")
 
         console.print(ClaudeStatusDisplay.create_info_panel(
             header_text.plain,
@@ -108,8 +108,8 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
 
     # Check if we can query (different logic for FAISS vs Qdrant)
     if config.vector_store_type == 'faiss':
-        collections_dir = config.rag_index_dir / "collections"
-        if not collections_dir.exists() or not any(collections_dir.iterdir()):
+        index_dir = config.rag_index_dir
+        if not index_dir.exists() or not any(index_dir.iterdir()):
             suggestions = [
                 "Run 'pcortex build' to create your first index",
                 "Check your DATALAKE_REPOS path in config",
@@ -128,12 +128,12 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
 
         with Live(progress, console=console, refresh_per_second=10):
             connect_task = progress.add_task(
-                f"[bold blue]Initializing indexer ({len(config.collections)} collections)...[/bold blue]",
+                f"[bold blue]Initializing indexer ({len(config.sources)} sources)...[/bold blue]",
                 total=None
             )
 
             indexer = DocumentIndexer(config)
-            progress.update(connect_task, description="[bold blue]Loading collections...[/bold blue]")
+            progress.update(connect_task, description="[bold blue]Loading unified index...[/bold blue]")
             indexer.load_index()
             progress.update(connect_task, description="[bold green]✓ Connected[/bold green]")
             time.sleep(0.2)  # Let user see the success
@@ -151,7 +151,7 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
             time.sleep(0.3)  # Show embedding phase
 
             query_progress.update(search_task, description="[bold blue]🔍 Searching vectors...[/bold blue]")
-            results = indexer.query(search_term, collection=collection, max_results=max_results)
+            results = indexer.query(search_term, source_type=source, max_results=max_results)
             query_time = (time.time() - start_time) * 1000
 
             query_progress.update(search_task, description="[bold green]✓ Search complete[/bold green]")
@@ -176,11 +176,11 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
         perf_text.append(f"Query completed in {query_time:.1f}ms", style=f"bold {perf_color}")
         perf_text.append(f" • Found {len(results)} results", style="dim")
 
-        # Show collection breakdown if searching all collections
-        if not collection and results:
+        # Show source breakdown if searching all sources
+        if not source and results:
             from collections import Counter
-            collection_counts = Counter(r.get("collection", "unknown") for r in results)
-            breakdown = ", ".join([f"{c}: {count}" for c, count in sorted(collection_counts.items())])
+            source_counts = Counter(r.get("source_type", "unknown") for r in results)
+            breakdown = ", ".join([f"{s}: {count}" for s, count in sorted(source_counts.items())])
             perf_text.append(f" • {breakdown}", style="dim")
 
         console.print(perf_text)

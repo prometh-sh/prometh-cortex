@@ -307,7 +307,18 @@ class QdrantVectorStore(VectorStoreInterface):
                 stats['failed'] += 1
         
         return stats
-    
+
+    def save_index(self) -> None:
+        """Save index to persistent storage.
+
+        For Qdrant, data is persisted automatically to the server,
+        so this is a no-op but required by the interface.
+        """
+        if not self._initialized:
+            self.initialize()
+        # Qdrant persists data automatically to the server
+        # No explicit save needed
+
     def query(self, 
              query_vector: List[float], 
              top_k: int = 10,

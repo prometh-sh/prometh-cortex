@@ -1,9 +1,15 @@
-# SPEC: RAG Multi-Collection Indexing System
+# SPEC: RAG Multi-Collection Indexing System (v0.2.0 - DEPRECATED)
 
-**Document Type:** Feature Specification
+> ⚠️ **DEPRECATED**: This specification documents v0.2.0 architecture, which has been superseded by v0.3.0.
+>
+> **Current Version**: See [feature-unified-collection-per-source-chunking-spec.md](feature-unified-collection-per-source-chunking-spec.md) for v0.3.0+ implementation.
+>
+> **Migration Guide**: See [docs/migration-v0.2-to-v0.3.md](../migration-v0.2-to-v0.3.md) for upgrade instructions.
+
+**Document Type:** Feature Specification (Archived)
 **Created:** 2025-10-15
-**Status:** Draft
-**Implementation Type:** Feature Development
+**Status:** Deprecated - Superseded by v0.3.0
+**Implementation Type:** Feature Development (Historical Reference)
 
 ---
 

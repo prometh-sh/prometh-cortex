@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from prometh_cortex.config import ConfigValidationError, load_config
-from prometh_cortex.cli.commands import build, rebuild, query, serve, mcp, health, fields, collections, analyze
+from prometh_cortex.cli.commands import build, rebuild, query, serve, mcp, health, fields, sources, analyze
 
 
 console = Console()
@@ -200,7 +200,7 @@ def config(sample: bool, init: bool, show_paths: bool):
 cli.add_command(build.build)
 cli.add_command(rebuild.rebuild)
 cli.add_command(query.query)
-cli.add_command(collections.collections)
+cli.add_command(sources.sources)
 cli.add_command(analyze.analyze)
 cli.add_command(serve.serve)
 cli.add_command(mcp.mcp)

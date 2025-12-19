@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-12-19
+
+### Added
+- **Unified Collection Architecture**: Single FAISS/Qdrant index replacing multi-collection model for better semantic search
+- **Per-Source Chunking**: Different chunk sizes and overlaps per source while maintaining unified index
+- **Source-Based Routing**: Intelligent document routing with longest-prefix-match algorithm
+- **Source Type Filtering**: Optional `source_type` parameter for filtering results by document source
+- **Document Metadata**: Enhanced metadata tracking with source type information
+- **CLI Source Management**: New `pcortex sources` command replacing `pcortex collections`
+- **MCP Tool Updates**: Renamed `prometh_cortex_list_collections` to `prometh_cortex_list_sources`
+- **HTTP API Updates**: Renamed `/prometh_cortex_collections` to `/prometh_cortex_sources`
+- **Comprehensive Documentation**: v0.3.0 architecture spec and v0.2→v0.3 migration guide
+
+### Changed
+- **Architecture**: Refactored from multi-collection to unified collection with per-source chunking
+- **Configuration Format**: Changed from `[[collections]]` with chunk params to `[[collections]]` + `[[sources]]`
+- **Query Performance**: Improved from ~500ms (3-collection queries) to ~300ms (unified index)
+- **Memory Usage**: Reduced by ~66% with single index instead of multiple collection indexes
+- **Router Return Type**: DocumentRouter now returns `(source_name, chunk_size, chunk_overlap)` tuple
+- **MCP API**: Query parameter `collection` → `source_type`
+- **HTTP API**: Query parameter `collection` → `source_type`
+- **PROMETH.md**: Updated with v0.3.0 status, implementation phases, and architecture evolution
+
+### Deprecated
+- v0.2.0 Multi-Collection architecture (superseded by v0.3.0)
+- `pcortex collections` command (replaced by `pcortex sources`)
+- `prometh_cortex_list_collections` MCP tool (replaced by `prometh_cortex_list_sources`)
+- `/prometh_cortex_collections` HTTP endpoint (replaced by `/prometh_cortex_sources`)
+
+### Fixed
+- DocumentChangeDetector metadata updates for incremental indexing
+- QdrantVectorStore interface compliance with save_index method
+
+### Migration
+- See `docs/migration-v0.2-to-v0.3.md` for detailed upgrade instructions
+- Backward compatibility: RAG_COLLECTIONS env var automatically mapped to RAG_SOURCES
+
 ## [0.1.3] - 2025-10-13
 
 ### Added

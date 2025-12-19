@@ -14,26 +14,39 @@ class ConfigValidationError(Exception):
     pass
 
 
-class CollectionConfig(BaseModel):
-    """Configuration for a RAG collection."""
+class SourceConfig(BaseModel):
+    """Configuration for a document source with chunking parameters."""
 
     name: str = Field(
         ...,
-        description="Unique collection name"
+        description="Semantic name for source type (e.g., 'knowledge_base', 'meetings')"
     )
     chunk_size: int = Field(
         default=512,
         ge=128, le=2048,
-        description="Size of text chunks for this collection"
+        description="Size of text chunks for documents from this source"
     )
     chunk_overlap: int = Field(
         default=50,
         ge=0, le=256,
-        description="Overlap between text chunks in this collection"
+        description="Overlap between text chunks for this source"
     )
     source_patterns: List[str] = Field(
         default_factory=list,
-        description="Path patterns that route documents to this collection (e.g., ['docs/specs', 'docs/prds'])"
+        description="Path patterns that route documents to this source (e.g., ['docs/specs', 'docs/prds'])"
+    )
+
+    class Config:
+        """Pydantic configuration."""
+        arbitrary_types_allowed = True
+
+
+class CollectionConfig(BaseModel):
+    """Configuration for the unified RAG collection."""
+
+    name: str = Field(
+        default="prometh_cortex",
+        description="Name of the unified RAG collection"
     )
 
     class Config:
@@ -72,17 +85,23 @@ class Config(BaseModel):
         description="Maximum number of results to return per query"
     )
 
-    # Multi-collection configuration (v0.2.0+)
-    collections: List[CollectionConfig] = Field(
+    # Single unified collection configuration
+    collection: CollectionConfig = Field(
+        default_factory=lambda: CollectionConfig(name="prometh_cortex"),
+        description="Configuration for the unified RAG collection"
+    )
+
+    # Document sources with per-source chunking configuration
+    sources: List[SourceConfig] = Field(
         default_factory=lambda: [
-            CollectionConfig(
+            SourceConfig(
                 name="default",
                 chunk_size=512,
                 chunk_overlap=50,
                 source_patterns=["*"]
             )
         ],
-        description="RAG collection configurations with source routing patterns"
+        description="Document source configurations with chunking parameters"
     )
     
     # Vector store configuration
@@ -221,44 +240,51 @@ class Config(BaseModel):
             return v.lower() in ("true", "1", "yes", "on")
         return bool(v)
 
-    @validator("collections", pre=True)
-    def parse_collections(cls, v):
-        """Parse collections from various formats."""
+    @validator("sources", pre=True)
+    def parse_sources(cls, v):
+        """Parse sources from various formats."""
         if isinstance(v, str):
             # Parse JSON string
             try:
                 parsed = json.loads(v)
                 if isinstance(parsed, list):
-                    return [CollectionConfig(**c) for c in parsed]
+                    return [SourceConfig(**c) for c in parsed]
                 else:
-                    raise ValueError("Collections must be a JSON array")
+                    raise ValueError("Sources must be a JSON array")
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in collections configuration: {e}")
+                raise ValueError(f"Invalid JSON in sources configuration: {e}")
         elif isinstance(v, list):
-            # Already a list, convert dicts to CollectionConfig
-            return [CollectionConfig(**c) if isinstance(c, dict) else c for c in v]
+            # Already a list, convert dicts to SourceConfig
+            return [SourceConfig(**c) if isinstance(c, dict) else c for c in v]
         else:
-            raise ValueError("Collections must be a list or JSON string")
+            raise ValueError("Sources must be a list or JSON string")
 
-    @validator("collections")
-    def validate_collections(cls, v):
-        """Validate collections configuration."""
+    @validator("sources")
+    def validate_sources(cls, v):
+        """Validate sources configuration."""
         if not v:
-            raise ValueError("At least one collection must be configured")
+            raise ValueError("At least one source must be configured")
 
-        collection_names = set()
-        has_default = False
+        source_names = set()
         has_catchall = False
 
-        for collection in v:
+        for source in v:
             # Check for duplicate names
-            if collection.name in collection_names:
-                raise ValueError(f"Duplicate collection name: {collection.name}")
-            collection_names.add(collection.name)
+            if source.name in source_names:
+                raise ValueError(f"Duplicate source name: {source.name}")
+            source_names.add(source.name)
 
             # Check for required patterns
-            if not collection.source_patterns:
-                raise ValueError(f"Collection '{collection.name}' must have at least one source pattern")
+            if not source.source_patterns:
+                raise ValueError(f"Source '{source.name}' must have at least one source pattern")
+
+            # Check for catch-all pattern
+            if "*" in source.source_patterns:
+                has_catchall = True
+
+        # Optional: catch-all pattern not required
+        # Sources can have specific patterns only if desired
+        # Documents that don't match any pattern will not be indexed
 
         return v
 
@@ -359,40 +385,71 @@ def _load_from_env() -> Config:
         except ValueError:
             raise ConfigValidationError(f"Invalid MAX_QUERY_RESULTS value: {max_query_results}")
 
-    # Collections configuration (v0.2.0+)
-    if rag_collections := os.getenv("RAG_COLLECTIONS"):
+    # Document sources configuration
+    if rag_sources := os.getenv("RAG_SOURCES"):
         try:
             # Try to parse as JSON first
-            collections = json.loads(rag_collections)
-            config_data["collections"] = collections
+            sources = json.loads(rag_sources)
+            config_data["sources"] = sources
         except json.JSONDecodeError:
-            # If not JSON, treat as simple collection names and create default config
-            # This allows: RAG_COLLECTIONS='knowledge_base,meetings,default'
-            collection_names = [name.strip() for name in rag_collections.split(",") if name.strip()]
+            # If not JSON, treat as simple source names and create default config
+            # This allows: RAG_SOURCES='knowledge_base,meetings,default'
+            source_names = [name.strip() for name in rag_sources.split(",") if name.strip()]
 
-            # Ensure "default" collection exists
-            if "default" not in collection_names:
-                collection_names.append("default")
+            # Ensure "default" source exists
+            if "default" not in source_names:
+                source_names.append("default")
 
             # Create simple default configurations
-            collections = []
-            for name in collection_names:
+            sources = []
+            for name in source_names:
                 if name == "default":
-                    collections.append({
+                    sources.append({
                         "name": "default",
                         "chunk_size": 512,
                         "chunk_overlap": 50,
                         "source_patterns": ["*"]
                     })
                 else:
-                    collections.append({
+                    sources.append({
                         "name": name,
                         "chunk_size": 512,
                         "chunk_overlap": 50,
                         "source_patterns": []  # Will need to be configured
                     })
 
-            config_data["collections"] = collections
+            config_data["sources"] = sources
+
+    # Backward compatibility: support old RAG_COLLECTIONS env var mapping to sources
+    if not (rag_sources := os.getenv("RAG_SOURCES")) and (rag_collections := os.getenv("RAG_COLLECTIONS")):
+        try:
+            # Try to parse as JSON first
+            sources = json.loads(rag_collections)
+            config_data["sources"] = sources
+        except json.JSONDecodeError:
+            # If not JSON, treat as simple source names
+            source_names = [name.strip() for name in rag_collections.split(",") if name.strip()]
+            if "default" not in source_names:
+                source_names.append("default")
+
+            sources = []
+            for name in source_names:
+                if name == "default":
+                    sources.append({
+                        "name": "default",
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": ["*"]
+                    })
+                else:
+                    sources.append({
+                        "name": name,
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": []
+                    })
+
+            config_data["sources"] = sources
     
     # Vector store configuration
     if vector_store_type := os.getenv("VECTOR_STORE_TYPE"):
@@ -530,19 +587,19 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
     if config.max_query_results:
         env_vars["MAX_QUERY_RESULTS"] = str(config.max_query_results)
 
-    # Collections configuration (v0.2.0+)
-    if config.collections:
+    # Document sources configuration
+    if config.sources:
         # Export as JSON for env variable
-        collections_list = [
+        sources_list = [
             {
-                "name": c.name,
-                "chunk_size": c.chunk_size,
-                "chunk_overlap": c.chunk_overlap,
-                "source_patterns": c.source_patterns
+                "name": s.name,
+                "chunk_size": s.chunk_size,
+                "chunk_overlap": s.chunk_overlap,
+                "source_patterns": s.source_patterns
             }
-            for c in config.collections
+            for s in config.sources
         ]
-        env_vars["RAG_COLLECTIONS"] = json.dumps(collections_list)
+        env_vars["RAG_SOURCES"] = json.dumps(sources_list)
     
     # Vector store configuration
     if config.vector_store_type:
@@ -635,10 +692,21 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
         if "max_query_results" in embedding:
             config_data["max_query_results"] = embedding["max_query_results"]
 
-    # Collections configuration (v0.2.0+)
+    # Collection configuration
     if "collections" in toml_data:
-        # TOML array of tables format: [[collections]]
-        config_data["collections"] = toml_data["collections"]
+        # Single collection config: [[collections]]
+        collections_list = toml_data["collections"]
+        if collections_list and isinstance(collections_list, list):
+            # Take the first (should only be one)
+            config_data["collection"] = collections_list[0]
+
+    # Document sources configuration
+    if "sources" in toml_data:
+        # TOML array of tables format: [[sources]]
+        config_data["sources"] = toml_data["sources"]
+    elif "collections" in toml_data and not ("sources" in toml_data):
+        # Backward compatibility: map old collections to sources
+        config_data["sources"] = toml_data["collections"]
     
     # Vector store configuration
     if "vector_store" in toml_data:
@@ -739,36 +807,42 @@ auth_token = "your-secure-token-here"
 model = "sentence-transformers/all-MiniLM-L6-v2"
 max_query_results = 10
 
-# Collections Configuration (v0.2.0+)
-# Each collection manages documents with specific chunking parameters
-# Required: At least one collection named "default" with source_patterns = ["*"]
+# Unified Collection Configuration
+# Single collection for all documents with per-source chunking
 
 [[collections]]
-# Default collection (catch-all for unmatched documents)
+name = "prometh_cortex"
+
+# Document Sources Configuration
+# Each source defines chunking parameters and path patterns
+# Required: At least one source with source_patterns = ["*"]
+
+[[sources]]
+# Default source (catch-all for unmatched documents)
 name = "default"
 chunk_size = 512
 chunk_overlap = 50
 source_patterns = ["*"]
 
-# Example: Knowledge base collection for technical documentation
-[[collections]]
+# Example: Knowledge base source for technical documentation
+[[sources]]
 name = "knowledge_base"
-chunk_size = 512
-chunk_overlap = 50
+chunk_size = 768
+chunk_overlap = 76
 source_patterns = ["docs/specs", "docs/prds"]
 
-# Example: Meetings collection with smaller chunks for context
-[[collections]]
+# Example: Meetings source with smaller chunks for context
+[[sources]]
 name = "meetings"
-chunk_size = 256
-chunk_overlap = 25
+chunk_size = 512
+chunk_overlap = 51
 source_patterns = ["meetings"]
 
-# Example: Activity logs collection for task-like documents
-[[collections]]
+# Example: Activity logs source for task-like documents
+[[sources]]
 name = "activity_logs"
-chunk_size = 128
-chunk_overlap = 10
+chunk_size = 256
+chunk_overlap = 26
 source_patterns = ["todos", "reminders"]
 
 [vector_store]
