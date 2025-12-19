@@ -8,6 +8,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for creating GitHub releases
+      packages: write
     
     steps:
     - uses: actions/checkout@v4
@@ -55,3 +58,4 @@ jobs:
         generate_release_notes: true
         draft: false
         prerelease: false
+        token: ${{ secrets.GITHUB_TOKEN }}
