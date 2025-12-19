@@ -1,6 +1,7 @@
 """Configuration settings and TOML configuration management."""
 
 import os
+import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -13,14 +14,48 @@ class ConfigValidationError(Exception):
     pass
 
 
+class SourceConfig(BaseModel):
+    """Configuration for a document source with chunking parameters."""
+
+    name: str = Field(
+        ...,
+        description="Semantic name for source type (e.g., 'knowledge_base', 'meetings')"
+    )
+    chunk_size: int = Field(
+        default=512,
+        ge=128, le=2048,
+        description="Size of text chunks for documents from this source"
+    )
+    chunk_overlap: int = Field(
+        default=50,
+        ge=0, le=256,
+        description="Overlap between text chunks for this source"
+    )
+    source_patterns: List[str] = Field(
+        default_factory=list,
+        description="Path patterns that route documents to this source (e.g., ['docs/specs', 'docs/prds'])"
+    )
+
+    class Config:
+        """Pydantic configuration."""
+        arbitrary_types_allowed = True
+
+
+class CollectionConfig(BaseModel):
+    """Configuration for the unified RAG collection."""
+
+    name: str = Field(
+        default="prometh_cortex",
+        description="Name of the unified RAG collection"
+    )
+
+    class Config:
+        """Pydantic configuration."""
+        arbitrary_types_allowed = True
+
+
 class Config(BaseModel):
     """Configuration settings for prometh-cortex."""
-    
-    # Required settings
-    datalake_repos: List[Path] = Field(
-        ..., 
-        description="List of datalake repository paths to index"
-    )
     
     # Optional settings with defaults
     rag_index_dir: Path = Field(
@@ -49,15 +84,24 @@ class Config(BaseModel):
         ge=1, le=100,
         description="Maximum number of results to return per query"
     )
-    chunk_size: int = Field(
-        default=512,
-        ge=128, le=2048,
-        description="Size of text chunks for embedding"
+
+    # Single unified collection configuration
+    collection: CollectionConfig = Field(
+        default_factory=lambda: CollectionConfig(name="prometh_cortex"),
+        description="Configuration for the unified RAG collection"
     )
-    chunk_overlap: int = Field(
-        default=50,
-        ge=0, le=256,
-        description="Overlap between text chunks"
+
+    # Document sources with per-source chunking configuration
+    sources: List[SourceConfig] = Field(
+        default_factory=lambda: [
+            SourceConfig(
+                name="default",
+                chunk_size=512,
+                chunk_overlap=50,
+                source_patterns=["*"]
+            )
+        ],
+        description="Document source configurations with chunking parameters"
     )
     
     # Vector store configuration
@@ -167,48 +211,6 @@ class Config(BaseModel):
         env_prefix = ""
         case_sensitive = False
         
-    @validator("datalake_repos", pre=True)
-    def parse_datalake_repos(cls, v):
-        """Parse comma-separated datalake repository paths."""
-        if isinstance(v, str):
-            # If the string doesn't contain commas, treat it as a single path
-            if "," not in v:
-                paths = [v.strip()]
-            else:
-                # Handle quoted paths by using csv module for proper parsing
-                import csv
-                import io
-                
-                # Try CSV parsing first for quoted strings
-                try:
-                    csv_reader = csv.reader(io.StringIO(v))
-                    paths = next(csv_reader)
-                    paths = [path.strip() for path in paths if path.strip()]
-                except:
-                    # Fall back to simple comma splitting
-                    paths = [path.strip() for path in v.split(",") if path.strip()]
-            
-            return [Path(path).expanduser().resolve() for path in paths]
-        elif isinstance(v, list):
-            return [Path(path).expanduser().resolve() for path in v]
-        else:
-            raise ValueError("datalake_repos must be a string or list")
-    
-    @validator("datalake_repos")
-    def validate_datalake_repos(cls, v):
-        """Validate that datalake repository paths exist and are readable."""
-        if not v:
-            raise ValueError("At least one datalake repository path must be specified")
-        
-        for path in v:
-            if not path.exists():
-                raise ValueError(f"Datalake repository path does not exist: {path}")
-            if not path.is_dir():
-                raise ValueError(f"Datalake repository path is not a directory: {path}")
-            if not os.access(path, os.R_OK):
-                raise ValueError(f"Datalake repository path is not readable: {path}")
-        
-        return v
     
     @validator("rag_index_dir", pre=True)
     def resolve_rag_index_dir(cls, v):
@@ -237,6 +239,54 @@ class Config(BaseModel):
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes", "on")
         return bool(v)
+
+    @validator("sources", pre=True)
+    def parse_sources(cls, v):
+        """Parse sources from various formats."""
+        if isinstance(v, str):
+            # Parse JSON string
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [SourceConfig(**c) for c in parsed]
+                else:
+                    raise ValueError("Sources must be a JSON array")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in sources configuration: {e}")
+        elif isinstance(v, list):
+            # Already a list, convert dicts to SourceConfig
+            return [SourceConfig(**c) if isinstance(c, dict) else c for c in v]
+        else:
+            raise ValueError("Sources must be a list or JSON string")
+
+    @validator("sources")
+    def validate_sources(cls, v):
+        """Validate sources configuration."""
+        if not v:
+            raise ValueError("At least one source must be configured")
+
+        source_names = set()
+        has_catchall = False
+
+        for source in v:
+            # Check for duplicate names
+            if source.name in source_names:
+                raise ValueError(f"Duplicate source name: {source.name}")
+            source_names.add(source.name)
+
+            # Check for required patterns
+            if not source.source_patterns:
+                raise ValueError(f"Source '{source.name}' must have at least one source pattern")
+
+            # Check for catch-all pattern
+            if "*" in source.source_patterns:
+                has_catchall = True
+
+        # Optional: catch-all pattern not required
+        # Sources can have specific patterns only if desired
+        # Documents that don't match any pattern will not be indexed
+
+        return v
 
 
 def load_config(config_file: Optional[Path] = None) -> Config:
@@ -310,10 +360,6 @@ def _load_from_env() -> Config:
     config_data = {}
     
     # Required settings
-    datalake_repos = os.getenv("DATALAKE_REPOS")
-    if datalake_repos:
-        config_data["datalake_repos"] = datalake_repos
-    
     # Optional settings
     if rag_index_dir := os.getenv("RAG_INDEX_DIR"):
         config_data["rag_index_dir"] = rag_index_dir
@@ -338,18 +384,72 @@ def _load_from_env() -> Config:
             config_data["max_query_results"] = int(max_query_results)
         except ValueError:
             raise ConfigValidationError(f"Invalid MAX_QUERY_RESULTS value: {max_query_results}")
-    
-    if chunk_size := os.getenv("CHUNK_SIZE"):
+
+    # Document sources configuration
+    if rag_sources := os.getenv("RAG_SOURCES"):
         try:
-            config_data["chunk_size"] = int(chunk_size)
-        except ValueError:
-            raise ConfigValidationError(f"Invalid CHUNK_SIZE value: {chunk_size}")
-    
-    if chunk_overlap := os.getenv("CHUNK_OVERLAP"):
+            # Try to parse as JSON first
+            sources = json.loads(rag_sources)
+            config_data["sources"] = sources
+        except json.JSONDecodeError:
+            # If not JSON, treat as simple source names and create default config
+            # This allows: RAG_SOURCES='knowledge_base,meetings,default'
+            source_names = [name.strip() for name in rag_sources.split(",") if name.strip()]
+
+            # Ensure "default" source exists
+            if "default" not in source_names:
+                source_names.append("default")
+
+            # Create simple default configurations
+            sources = []
+            for name in source_names:
+                if name == "default":
+                    sources.append({
+                        "name": "default",
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": ["*"]
+                    })
+                else:
+                    sources.append({
+                        "name": name,
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": []  # Will need to be configured
+                    })
+
+            config_data["sources"] = sources
+
+    # Backward compatibility: support old RAG_COLLECTIONS env var mapping to sources
+    if not (rag_sources := os.getenv("RAG_SOURCES")) and (rag_collections := os.getenv("RAG_COLLECTIONS")):
         try:
-            config_data["chunk_overlap"] = int(chunk_overlap)
-        except ValueError:
-            raise ConfigValidationError(f"Invalid CHUNK_OVERLAP value: {chunk_overlap}")
+            # Try to parse as JSON first
+            sources = json.loads(rag_collections)
+            config_data["sources"] = sources
+        except json.JSONDecodeError:
+            # If not JSON, treat as simple source names
+            source_names = [name.strip() for name in rag_collections.split(",") if name.strip()]
+            if "default" not in source_names:
+                source_names.append("default")
+
+            sources = []
+            for name in source_names:
+                if name == "default":
+                    sources.append({
+                        "name": "default",
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": ["*"]
+                    })
+                else:
+                    sources.append({
+                        "name": name,
+                        "chunk_size": 512,
+                        "chunk_overlap": 50,
+                        "source_patterns": []
+                    })
+
+            config_data["sources"] = sources
     
     # Vector store configuration
     if vector_store_type := os.getenv("VECTOR_STORE_TYPE"):
@@ -469,10 +569,6 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
     """
     env_vars = {}
     
-    # Datalake configuration
-    if config.datalake_repos:
-        env_vars["DATALAKE_REPOS"] = ",".join(str(repo) for repo in config.datalake_repos)
-    
     # Storage configuration
     if config.rag_index_dir:
         env_vars["RAG_INDEX_DIR"] = str(config.rag_index_dir)
@@ -490,10 +586,20 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
         env_vars["EMBEDDING_MODEL"] = config.embedding_model
     if config.max_query_results:
         env_vars["MAX_QUERY_RESULTS"] = str(config.max_query_results)
-    if config.chunk_size:
-        env_vars["CHUNK_SIZE"] = str(config.chunk_size)
-    if config.chunk_overlap:
-        env_vars["CHUNK_OVERLAP"] = str(config.chunk_overlap)
+
+    # Document sources configuration
+    if config.sources:
+        # Export as JSON for env variable
+        sources_list = [
+            {
+                "name": s.name,
+                "chunk_size": s.chunk_size,
+                "chunk_overlap": s.chunk_overlap,
+                "source_patterns": s.source_patterns
+            }
+            for s in config.sources
+        ]
+        env_vars["RAG_SOURCES"] = json.dumps(sources_list)
     
     # Vector store configuration
     if config.vector_store_type:
@@ -562,12 +668,6 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     config_data = {}
     
-    # Datalake configuration
-    if "datalake" in toml_data:
-        datalake = toml_data["datalake"]
-        if "repos" in datalake:
-            config_data["datalake_repos"] = datalake["repos"]
-    
     # Storage configuration
     if "storage" in toml_data:
         storage = toml_data["storage"]
@@ -591,10 +691,22 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
             config_data["embedding_model"] = embedding["model"]
         if "max_query_results" in embedding:
             config_data["max_query_results"] = embedding["max_query_results"]
-        if "chunk_size" in embedding:
-            config_data["chunk_size"] = embedding["chunk_size"]
-        if "chunk_overlap" in embedding:
-            config_data["chunk_overlap"] = embedding["chunk_overlap"]
+
+    # Collection configuration
+    if "collections" in toml_data:
+        # Single collection config: [[collections]]
+        collections_list = toml_data["collections"]
+        if collections_list and isinstance(collections_list, list):
+            # Take the first (should only be one)
+            config_data["collection"] = collections_list[0]
+
+    # Document sources configuration
+    if "sources" in toml_data:
+        # TOML array of tables format: [[sources]]
+        config_data["sources"] = toml_data["sources"]
+    elif "collections" in toml_data and not ("sources" in toml_data):
+        # Backward compatibility: map old collections to sources
+        config_data["sources"] = toml_data["collections"]
     
     # Vector store configuration
     if "vector_store" in toml_data:
@@ -676,7 +788,7 @@ def create_sample_config_file(path: Path = Path("config.toml.sample")) -> None:
 # Add your document directories here - supports multiple paths
 repos = [
     "/path/to/your/notes",
-    "/path/to/your/documents", 
+    "/path/to/your/documents",
     "/path/to/your/projects"
 ]
 
@@ -691,11 +803,47 @@ host = "localhost"
 auth_token = "your-secure-token-here"
 
 [embedding]
-# Embedding model and chunking configuration
+# Embedding model and query configuration
 model = "sentence-transformers/all-MiniLM-L6-v2"
 max_query_results = 10
+
+# Unified Collection Configuration
+# Single collection for all documents with per-source chunking
+
+[[collections]]
+name = "prometh_cortex"
+
+# Document Sources Configuration
+# Each source defines chunking parameters and path patterns
+# Required: At least one source with source_patterns = ["*"]
+
+[[sources]]
+# Default source (catch-all for unmatched documents)
+name = "default"
 chunk_size = 512
 chunk_overlap = 50
+source_patterns = ["*"]
+
+# Example: Knowledge base source for technical documentation
+[[sources]]
+name = "knowledge_base"
+chunk_size = 768
+chunk_overlap = 76
+source_patterns = ["docs/specs", "docs/prds"]
+
+# Example: Meetings source with smaller chunks for context
+[[sources]]
+name = "meetings"
+chunk_size = 512
+chunk_overlap = 51
+source_patterns = ["meetings"]
+
+# Example: Activity logs source for task-like documents
+[[sources]]
+name = "activity_logs"
+chunk_size = 256
+chunk_overlap = 26
+source_patterns = ["todos", "reminders"]
 
 [vector_store]
 # Vector store backend: "faiss" (local) or "qdrant" (scalable)

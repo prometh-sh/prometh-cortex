@@ -27,9 +27,13 @@ class QueryRequest(BaseModel):
     """Request model for RAG query endpoint."""
     query: str = Field(..., min_length=1, description="Search query text (simple or structured)")
     max_results: Optional[int] = Field(
-        default=None, 
+        default=None,
         ge=1, le=100,
         description="Maximum number of results to return"
+    )
+    source_type: Optional[str] = Field(
+        default=None,
+        description="Optional source type to filter by (default: search all sources)"
     )
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -162,8 +166,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     @app.post(
         "/prometh_cortex_query",
         response_model=QueryResponse,
-        summary="Query RAG Index with Structured Query Support",
-        description="Search indexed documents using semantic similarity with optional structured query filters"
+        summary="Query RAG Index with Per-Source Chunking",
+        description="Search indexed documents using semantic similarity with optional structured query filters and source type filtering"
     )
     async def query_rag_index(
         request: QueryRequest,
@@ -171,16 +175,26 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         indexer: DocumentIndexer = Depends(get_indexer),
         config: Config = Depends(get_current_config)
     ):
-        """Query the RAG index for similar documents with structured query support."""
+        """Query the RAG index for similar documents with per-source chunking."""
         try:
             start_time = time.time()
-            
+
             # Determine max results
             max_results = request.max_results or config.max_query_results
-            
-            # Perform query (indexer now handles structured query parsing)
+
+            # Validate source_type if specified
+            if request.source_type:
+                valid_sources = [s.name for s in config.sources]
+                if request.source_type not in valid_sources:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Source type '{request.source_type}' not found. Available: {valid_sources}"
+                    )
+
+            # Perform query with optional source_type filtering
             results = indexer.query(
-                request.query, 
+                request.query,
+                source_type=request.source_type,
                 max_results=max_results,
                 filters=request.filters  # Additional filters merged with parsed filters
             )
@@ -351,18 +365,55 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
-    
+
+    @app.get(
+        "/prometh_cortex_sources",
+        summary="List Sources",
+        description="Get list of all available document sources with metadata"
+    )
+    async def list_sources(
+        _: bool = Depends(verify_auth_token),
+        indexer: DocumentIndexer = Depends(get_indexer),
+        config: Config = Depends(get_current_config)
+    ):
+        """List all available document sources and their statistics."""
+        try:
+            # Get source information from indexer
+            sources_info = indexer.list_sources()
+
+            # Format response
+            response = {
+                "collection_name": sources_info.get("collection_name", "prometh_cortex"),
+                "sources": sources_info.get("sources", []),
+                "total_sources": sources_info.get("total_sources", 0),
+                "total_documents": sources_info.get("total_documents", 0),
+                "source_names": [s["name"] for s in sources_info.get("sources", [])]
+            }
+
+            return response
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list sources: {e}")
+
     @app.get("/", summary="Root", description="API root endpoint")
     async def root():
         """Root endpoint with API information."""
         return {
             "name": "Prometh Cortex MCP Server",
-            "version": "0.1.0",
-            "description": "Multi-Datalake RAG Indexer with Local MCP Integration",
+            "version": "0.3.0",
+            "description": "Multi-Datalake RAG Indexer with Unified Collection + Per-Source Chunking",
             "endpoints": {
-                "query": "/prometh_cortex_query",
+                "query": "/prometh_cortex_query (with optional 'source_type' parameter for source filtering)",
+                "sources": "/prometh_cortex_sources",
                 "health": "/prometh_cortex_health",
                 "docs": "/docs"
+            },
+            "features": {
+                "unified_collection": True,
+                "per_source_chunking": True,
+                "source_filtering": True,
+                "structured_queries": True,
+                "full_document_content": True
             },
             "status": "running",
             "timestamp": datetime.now().isoformat()

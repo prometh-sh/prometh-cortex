@@ -135,28 +135,32 @@ async def lazy_load_index():
 async def prometh_cortex_query(
     query: str,
     max_results: Optional[int] = None,
+    source_type: Optional[str] = None,
     filters: Optional[Dict[str, Any]] = None,
     show_query_info: bool = False,
     include_full_content: bool = False
 ) -> Dict[str, Any]:
     """Query indexed documents with enhanced tag-based filtering and semantic search.
-    
+
+    Per-source chunking support (v0.3.0+): Query across unified index with optional source filtering.
+
     RECOMMENDED: Use tags for precise filtering, semantic text for content matching.
-    
+
     Supported query formats:
     - Simple: "meeting notes discussion"
-    - Tag filters: "tags:work,urgent" or "tags:meetings|planning" or "tags:project+urgent"  
+    - Tag filters: "tags:work,urgent" or "tags:meetings|planning" or "tags:project+urgent"
     - Date filters: "created:2024-12-08" or "created:2024-12-01:2024-12-08"
     - Combined: "tags:meetings,work created:2024-12-08 discussion agenda"
     - Other fields: "author:john status:completed project update"
-    
+
     Args:
         query: The search query text (simple or structured)
         max_results: Maximum number of results to return (default: config value)
+        source_type: Optional source type to filter by (default: search all sources)
         filters: Optional additional filters (merged with parsed structured filters)
         show_query_info: Include query parsing information in response for debugging
         include_full_content: Load and include complete document content (not just chunks)
-    
+
     Returns:
         Dictionary containing query results, timing, metadata, and optionally full document content
     """
@@ -165,30 +169,40 @@ async def prometh_cortex_query(
         indexer = await lazy_load_index()
         if not indexer:
             return {"error": "Indexer not initialized"}
-        
+
         start_time = time.time()
-        
+
         # Determine max results
         if max_results is None:
             max_results = config.max_query_results
-        
+
+        # Validate source_type if specified
+        if source_type:
+            valid_sources = [s.name for s in config.sources]
+            if source_type not in valid_sources:
+                return {
+                    "error": f"Source type '{source_type}' not found",
+                    "available_sources": valid_sources
+                }
+
         # Convert legacy filters to vector store filters and apply vector-level filtering
         vector_store_filters = {}
         post_process_filters = {}
-        
+
         if filters:
             # Separate filters that can be applied at vector store level vs post-processing
             for key, value in filters.items():
-                if key in ["datalake", "tags"]:
+                if key in ["datalake", "tags", "source_type"]:
                     # These need post-processing due to complex logic
                     post_process_filters[key] = value
                 else:
                     # Direct metadata filters can be handled by vector store
                     vector_store_filters[key] = value
-        
-        # Perform query with vector store filters
+
+        # Perform query with optional source_type filtering
         results = indexer.query(
-            query, 
+            query,
+            source_type=source_type,
             max_results=max_results * 2 if post_process_filters else max_results,  # Get more if post-filtering
             filters=vector_store_filters if vector_store_filters else None
         )
@@ -360,22 +374,71 @@ async def prometh_cortex_query(
 
 
 @mcp.tool()
+async def prometh_cortex_list_sources() -> Dict[str, Any]:
+    """List all available document sources with metadata.
+
+    Per-source chunking support (v0.3.0+): Get information about all configured sources
+    including chunking parameters, source patterns, and document counts.
+
+    Returns:
+        Dictionary containing list of sources with metadata
+    """
+    try:
+        # Lazy load index to get statistics
+        indexer_instance = await lazy_load_index()
+        if not indexer_instance:
+            return {
+                "error": "Indexer not initialized",
+                "sources": [s.name for s in config.sources] if config else []
+            }
+
+        # Get source information from indexer
+        sources_info = indexer_instance.list_sources()
+
+        # Format response
+        response = {
+            "collection_name": sources_info.get("collection_name", "prometh_cortex"),
+            "sources": sources_info.get("sources", []),
+            "total_sources": sources_info.get("total_sources", 0),
+            "total_documents": sources_info.get("total_documents", 0)
+        }
+
+        # Add source names for quick reference
+        response["source_names"] = [s["name"] for s in response.get("sources", [])]
+
+        return response
+
+    except Exception as e:
+        logger.critical(f"List sources failed: {e}")
+        return {
+            "error": str(e),
+            "sources": [s.name for s in config.sources] if config else []
+        }
+
+
+@mcp.tool()
 async def prometh_cortex_health() -> Dict[str, Any]:
     """Get health status and statistics for the Prometh-Cortex system.
-    
+
     Returns:
         Dictionary containing health status, indexed files count, and system metrics
     """
     try:
         start_time = time.time()
-        
+
         # Basic health info
         health_info = {
             "status": "healthy",
             "embedding_model": config.embedding_model if config else "unknown",
             "vector_store_type": config.vector_store_type if config else "unknown"
         }
-        
+
+        # Unified collection + sources info
+        if config:
+            health_info["collection_name"] = config.collection.name if config.collection else "prometh_cortex"
+            health_info["total_sources"] = len(config.sources)
+            health_info["source_names"] = [s.name for s in config.sources]
+
         # Get indexer statistics if available
         try:
             # Try to lazy load index for health check
@@ -404,16 +467,14 @@ async def prometh_cortex_health() -> Dict[str, Any]:
                 "indexed_files": 0,
                 "index_stats": {"status": "index_loading_failed", "error": str(e)}
             })
-        
+
         # Add configuration info
         if config:
             config_info = {
-                "datalake_repos": [str(p) for p in config.datalake_repos],
-                "max_query_results": config.max_query_results,
-                "chunk_size": config.chunk_size,
-                "chunk_overlap": config.chunk_overlap
+                "total_sources": len(config.sources),
+                "max_query_results": config.max_query_results
             }
-            
+
             # Add vector store specific info
             if config.vector_store_type == 'faiss':
                 config_info["rag_index_dir"] = str(config.rag_index_dir)
@@ -424,15 +485,15 @@ async def prometh_cortex_health() -> Dict[str, Any]:
                     "qdrant_collection_name": config.qdrant_collection_name,
                     "qdrant_use_https": config.qdrant_use_https
                 })
-            
+
             health_info.update(config_info)
-        
+
         # Add timing
         health_check_time = (time.time() - start_time) * 1000
         health_info["health_check_time_ms"] = health_check_time
-        
+
         return health_info
-        
+
     except Exception as e:
         logger.critical(f"Health check failed: {e}")
         return {

@@ -165,19 +165,15 @@ def _create_detailed_diagnostics(config, health_data, check_time):
     if "index_size" in health_data:
         details.append(f"  Index Size: {health_data['index_size']}")
     
-    # Datalake info
+    # Collection info
     details.append("")
-    details.append("[bold yellow]📂 Datalakes:[/bold yellow]")
-    for i, repo in enumerate(config.datalake_repos, 1):
-        details.append(f"  {i}. {repo}")
-        if repo.exists():
-            try:
-                md_files = len(list(repo.rglob("*.md")))
-                details.append(f"     └── {md_files} markdown files")
-            except:
-                details.append(f"     └── (access error)")
-        else:
-            details.append(f"     └── [red](path not found)[/red]")
+    details.append("[bold yellow]📦 Collections:[/bold yellow]")
+    for i, collection in enumerate(config.collections, 1):
+        details.append(f"  {i}. {collection.name} (chunk_size={collection.chunk_size})")
+        patterns_str = ', '.join(collection.source_patterns[:2])
+        if len(collection.source_patterns) > 2:
+            patterns_str += f", +{len(collection.source_patterns)-2} more"
+        details.append(f"     └── patterns: {patterns_str}")
     
     return "\n".join(details)
 

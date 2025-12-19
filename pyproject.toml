@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prometh-cortex"
-version = "0.1.3"
-description = "Multi-Datalake RAG Indexer with Local MCP Integration"
+version = "0.3.0"
+description = "Multi-Datalake RAG Indexer with Unified Collection & Per-Source Chunking - MCP & HTTP Server"
 authors = [
     {name = "Ivan Nagy", email = "prometh-cortex@prometh.sh"},
 ]

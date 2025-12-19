@@ -25,12 +25,12 @@ console = Console()
 @click.argument("search_term", required=True)
 @click.option(
     "--max-results",
-    "-n", 
+    "-n",
     type=int,
     help="Maximum number of results to return"
 )
 @click.option(
-    "--show-content", 
+    "--show-content",
     is_flag=True,
     help="Show full content snippets in results"
 )
@@ -39,19 +39,27 @@ console = Console()
     is_flag=True,
     help="Show applied filters and query parsing information"
 )
+@click.option(
+    "--source",
+    "-s",
+    help="Filter by specific source (default: search all sources)"
+)
 @click.pass_context
-def query(ctx: click.Context, search_term: str, max_results: int, show_content: bool, show_filters: bool):
-    """Query the RAG index with enhanced tag-based filtering and semantic search.
-    
+def query(ctx: click.Context, search_term: str, max_results: int, show_content: bool, show_filters: bool, source: str):
+    """Query the unified RAG index with optional source filtering.
+
+    Per-source chunking (v0.3.0+): Search across all sources in the unified collection
+    or filter by a specific source for more targeted results.
+
     RECOMMENDED: Use tags for precise filtering, semantic text for content matching.
-    
+
     Examples:
-      pcortex query "meeting notes"                    # Simple semantic search  
-      pcortex query "tags:meetings,work discussion"   # Tag filter + semantic text
-      pcortex query "tags:urgent|important project"   # Multiple tag formats
-      pcortex query "created:2024-12-08 agenda"       # Date filtering
-      
-    TIP: Run 'pcortex fields' to discover available metadata fields in your documents.
+      pcortex query "meeting notes"                           # Search all sources
+      pcortex query "agenda" --source meetings                # Filter by source
+      pcortex query "tags:meetings,work discussion"          # Tag filter + semantic text
+      pcortex query "created:2024-12-08 agenda"               # Date filtering
+
+    TIP: Run 'pcortex sources' to see available sources.
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
@@ -59,31 +67,52 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
     # Use config default if max_results not specified
     if max_results is None:
         max_results = config.max_query_results
-    
+
+    # Validate source if specified
+    if source:
+        valid_sources = [s.name for s in config.sources]
+        if source not in valid_sources:
+            suggestions = [
+                f"Available sources: {', '.join(valid_sources)}",
+                f"Run 'pcortex sources' to list all sources"
+            ]
+            console.print(ClaudeStatusDisplay.create_error_panel(
+                "Source Not Found",
+                f"Source '{source}' does not exist",
+                suggestions
+            ))
+            sys.exit(1)
+
     # Beautiful header
     if verbose:
         header_text = Text()
         header_text.append("🔍 ", style="bold blue")
         header_text.append("Semantic Search", style="bold blue")
-        
+
         query_info = [
             f"Query: [bold cyan]'{search_term}'[/bold cyan]",
             f"Max Results: [dim]{max_results}[/dim]",
-            f"Vector Store: [bold cyan]{config.vector_store_type.upper()}[/bold cyan]"
+            f"Vector Store: [bold cyan]{config.vector_store_type.upper()}[/bold cyan]",
         ]
-        
+
+        if source:
+            query_info.append(f"Source Filter: [bold yellow]{source}[/bold yellow]")
+        else:
+            query_info.append(f"Sources: [bold yellow]All ({len(config.sources)})[/bold yellow]")
+
         console.print(ClaudeStatusDisplay.create_info_panel(
             header_text.plain,
             "\n".join(query_info)
         ))
         console.print()
-    
+
     # Check if we can query (different logic for FAISS vs Qdrant)
     if config.vector_store_type == 'faiss':
-        if not config.rag_index_dir.exists() or not any(config.rag_index_dir.iterdir()):
+        index_dir = config.rag_index_dir
+        if not index_dir.exists() or not any(index_dir.iterdir()):
             suggestions = [
                 "Run 'pcortex build' to create your first index",
-                "Check your DATALAKE_REPOS path in .env",
+                "Check your DATALAKE_REPOS path in config",
                 "Verify you have markdown files to index"
             ]
             console.print(ClaudeStatusDisplay.create_error_panel(
@@ -92,39 +121,39 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
                 suggestions
             ))
             sys.exit(1)
-    
+
     try:
         # Phase 1: Initialize with animated connection
         progress = ClaudeProgress.create_connection_progress()
-        
+
         with Live(progress, console=console, refresh_per_second=10):
             connect_task = progress.add_task(
-                f"[bold blue]Connecting to {config.vector_store_type.upper()}...[/bold blue]",
+                f"[bold blue]Initializing indexer ({len(config.sources)} sources)...[/bold blue]",
                 total=None
             )
-            
+
             indexer = DocumentIndexer(config)
-            progress.update(connect_task, description="[bold blue]Loading index...[/bold blue]")
+            progress.update(connect_task, description="[bold blue]Loading unified index...[/bold blue]")
             indexer.load_index()
             progress.update(connect_task, description="[bold green]✓ Connected[/bold green]")
             time.sleep(0.2)  # Let user see the success
         
         # Phase 2: Animated query processing
         query_progress = ClaudeProgress.create_connection_progress()
-        
+
         with Live(query_progress, console=console, refresh_per_second=10):
             search_task = query_progress.add_task(
                 "[bold blue]🧠 Embedding query...[/bold blue]",
                 total=None
             )
-            
+
             start_time = time.time()
             time.sleep(0.3)  # Show embedding phase
-            
+
             query_progress.update(search_task, description="[bold blue]🔍 Searching vectors...[/bold blue]")
-            results = indexer.query(search_term, max_results=max_results)
+            results = indexer.query(search_term, source_type=source, max_results=max_results)
             query_time = (time.time() - start_time) * 1000
-            
+
             query_progress.update(search_task, description="[bold green]✓ Search complete[/bold green]")
             time.sleep(0.2)
         
@@ -141,11 +170,19 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
         # Performance celebration
         perf_color = "green" if query_time < 100 else "yellow" if query_time < 200 else "red"
         perf_emoji = "⚡" if query_time < 100 else "🐌" if query_time > 500 else "🚀"
-        
+
         perf_text = Text()
         perf_text.append(f"{perf_emoji} ", style=perf_color)
         perf_text.append(f"Query completed in {query_time:.1f}ms", style=f"bold {perf_color}")
         perf_text.append(f" • Found {len(results)} results", style="dim")
+
+        # Show source breakdown if searching all sources
+        if not source and results:
+            from collections import Counter
+            source_counts = Counter(r.get("source_type", "unknown") for r in results)
+            breakdown = ", ".join([f"{s}: {count}" for s, count in sorted(source_counts.items())])
+            perf_text.append(f" • {breakdown}", style="dim")
+
         console.print(perf_text)
         console.print()
         
