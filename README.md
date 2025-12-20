@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![PyPI version](https://img.shields.io/pypi/v/prometh-cortex.svg)](https://pypi.org/project/prometh-cortex/)
 [![Python Support](https://img.shields.io/pypi/pyversions/prometh-cortex.svg)](https://pypi.org/project/prometh-cortex/)
-[![Tests](https://github.com/ivannagy/prometh-cortex/actions/workflows/test.yml/badge.svg)](https://github.com/ivannagy/prometh-cortex/actions/workflows/test.yml)
+[![Tests](https://github.com/prometh-sh/prometh-cortex/actions/workflows/test.yml/badge.svg)](https://github.com/prometh-sh/prometh-cortex/actions/workflows/test.yml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-green.svg)](https://docs.anthropic.com/en/docs/claude-code)
 
 Multi-Datalake RAG Indexer with Local MCP Integration
@@ -51,7 +51,7 @@ pip install prometh-cortex
 ### From Source (Development)
 
 ```bash
-git clone https://github.com/ivannagy/prometh-cortex.git
+git clone https://github.com/prometh-sh/prometh-cortex.git
 cd prometh-cortex
 pip install -e ".[dev]"
 ```
@@ -1194,14 +1194,14 @@ Found a security vulnerability? Please see [SECURITY.md](SECURITY.md) for respon
 ### Getting Help
 
 - **Documentation**: See the [/docs](docs/) directory for detailed guides
-- **Issues**: Report bugs or request features via [GitHub Issues](https://github.com/ivannagy/prometh-cortex/issues)
-- **Discussions**: Ask questions or share ideas in [GitHub Discussions](https://github.com/ivannagy/prometh-cortex/discussions)
+- **Issues**: Report bugs or request features via [GitHub Issues](https://github.com/prometh-sh/prometh-cortex/issues)
+- **Discussions**: Ask questions or share ideas in [GitHub Discussions](https://github.com/prometh-sh/prometh-cortex/discussions)
 - **Security**: For security issues, see [SECURITY.md](SECURITY.md)
 
 ### Resources
 
 - **PyPI Package**: https://pypi.org/project/prometh-cortex/
-- **Source Code**: https://github.com/ivannagy/prometh-cortex
+- **Source Code**: https://github.com/prometh-sh/prometh-cortex
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history
 
 ### Community
