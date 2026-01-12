@@ -168,12 +168,20 @@ class DocumentIndexer:
             file_path: Path to markdown file to index
 
         Returns:
-            Dictionary with status, source_type, and chunks count
+            Dictionary with status, source_type, chunks count, file_hash, and modified_time
 
         Raises:
             IndexerError: If document addition fails
         """
         try:
+            # Get file metadata for change detection
+            import os
+            file_stat = os.stat(file_path)
+            modified_time = file_stat.st_mtime
+
+            # Compute file hash for change detection
+            file_hash = self.change_detector._compute_file_hash(str(file_path))
+
             # Parse markdown document
             markdown_doc = parse_markdown_file(file_path)
 
@@ -215,6 +223,8 @@ class DocumentIndexer:
                 "status": "success",
                 "source_type": source_name,
                 "chunks": len(chunks),
+                "file_hash": file_hash,
+                "modified_time": modified_time,
             }
 
         except Exception as e:

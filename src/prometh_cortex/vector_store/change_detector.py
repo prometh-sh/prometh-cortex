@@ -98,9 +98,35 @@ class DocumentChangeDetector:
         
         self._save_metadata()
     
+    def has_changed(self, doc_path: str) -> bool:
+        """Check if a single document has changed since last indexing.
+
+        Args:
+            doc_path: Path to document file
+
+        Returns:
+            True if document is new or has changed, False if unchanged
+        """
+        # If document not in index, it's new
+        if doc_path not in self.indexed_docs:
+            return True
+
+        # If file doesn't exist anymore, consider it changed (will be handled as deleted)
+        if not os.path.exists(doc_path):
+            return True
+
+        # Compare hash and modification time
+        current_hash = self._compute_file_hash(doc_path)
+        indexed_hash = self.indexed_docs[doc_path].get('file_hash')
+        current_mtime = os.path.getmtime(doc_path)
+        indexed_mtime = self.indexed_docs[doc_path].get('modified_time', 0)
+
+        # Document has changed if hash differs or modification time is newer
+        return current_hash != indexed_hash or current_mtime > indexed_mtime
+
     def get_stats(self) -> Dict[str, any]:
         """Get change detector statistics.
-        
+
         Returns:
             Statistics dict with indexed document counts and metadata
         """
