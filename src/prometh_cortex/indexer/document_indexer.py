@@ -60,10 +60,30 @@ class DocumentIndexer:
 
     def _initialize_embedding_model(self) -> None:
         """Initialize the embedding model."""
+        import warnings
+        import os
+        import sys
         try:
-            self.embed_model = HuggingFaceEmbedding(
-                model_name=self.config.embedding_model
-            )
+            # Suppress noisy HuggingFace/sentence-transformers warnings
+            os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=FutureWarning)
+                warnings.filterwarnings("ignore", message=".*position_ids.*")
+                warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+                logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+                logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+                logging.getLogger("transformers").setLevel(logging.ERROR)
+                # Suppress stderr output from model loading (progress bars, load reports)
+                old_stderr = sys.stderr
+                sys.stderr = open(os.devnull, "w")
+                try:
+                    self.embed_model = HuggingFaceEmbedding(
+                        model_name=self.config.embedding_model
+                    )
+                finally:
+                    sys.stderr.close()
+                    sys.stderr = old_stderr
             logger.info(f"Embedding model initialized: {self.config.embedding_model}")
         except Exception as e:
             raise IndexerError(
