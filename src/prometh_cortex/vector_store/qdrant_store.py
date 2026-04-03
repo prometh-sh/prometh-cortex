@@ -17,6 +17,7 @@ from qdrant_client.models import (
     MatchValue,
     MatchAny,
     Range,
+    PayloadSchemaType,
 )
 
 from .interface import VectorStoreInterface, DocumentChange
@@ -522,9 +523,31 @@ class QdrantVectorStore(VectorStoreInterface):
                 
             # Wait for collection to be ready
             self._wait_for_collection_ready()
-            
+
+            # Create payload indexes for filterable fields
+            self._ensure_payload_indexes()
+
         except Exception as e:
             raise RuntimeError(f"Failed to ensure collection exists: {e}")
+
+    def _ensure_payload_indexes(self) -> None:
+        """Create payload indexes for fields used in filtering."""
+        index_fields = {
+            "source_type": PayloadSchemaType.KEYWORD,
+            "file_path": PayloadSchemaType.KEYWORD,
+            "file_name": PayloadSchemaType.KEYWORD,
+            "tags": PayloadSchemaType.KEYWORD,
+        }
+        for field_name, field_type in index_fields.items():
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field_name,
+                    field_schema=field_type,
+                )
+            except Exception:
+                # Index may already exist, skip
+                pass
     
     def _wait_for_collection_ready(self, timeout: int = 30) -> None:
         """Wait for collection to be ready."""

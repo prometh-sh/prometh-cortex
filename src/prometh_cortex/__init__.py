@@ -6,7 +6,7 @@ containing Markdown files and expose their content for RAG workflows through
 a local MCP server.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.2"
 __author__ = "Ivan Nagy"
 __email__ = "contact@example.com"
 

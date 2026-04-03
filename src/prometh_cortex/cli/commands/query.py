@@ -179,7 +179,7 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
         # Show source breakdown if searching all sources
         if not source and results:
             from collections import Counter
-            source_counts = Counter(r.get("source_type", "unknown") for r in results)
+            source_counts = Counter(r.get("metadata", {}).get("source_type", "unknown") for r in results)
             breakdown = ", ".join([f"{s}: {count}" for s, count in sorted(source_counts.items())])
             perf_text.append(f" • {breakdown}", style="dim")
 
@@ -246,10 +246,33 @@ def query(ctx: click.Context, search_term: str, max_results: int, show_content: 
                 meta_table.add_column("Property", style="bold cyan", width=15)
                 meta_table.add_column("Value", style="white")
                 
-                for key, value in list(metadata.items())[:6]:  # Show first 6 metadata items
+                # Show curated metadata fields in a useful order
+                priority_keys = [
+                    "file_path", "title", "file_name", "source_type",
+                    "file_extension", "file_size", "chunk_index",
+                ]
+                shown_keys = set()
+                for key in priority_keys:
+                    if key in metadata:
+                        value = metadata[key]
+                        if isinstance(value, (list, dict)):
+                            value = str(value)[:80] + ("..." if len(str(value)) > 80 else "")
+                        meta_table.add_row(key.title().replace("_", " "), str(value))
+                        shown_keys.add(key)
+                # Show remaining interesting fields (skip internal/noisy ones)
+                skip_keys = shown_keys | {
+                    "chunk_start", "chunk_end", "total_chunks",
+                    "chunk_config", "document_id", "text",
+                }
+                for key, value in metadata.items():
+                    if key in skip_keys:
+                        continue
+                    if len(shown_keys) >= 10:
+                        break
                     if isinstance(value, (list, dict)):
-                        value = str(value)[:60] + ("..." if len(str(value)) > 60 else "")
-                    meta_table.add_row(key.title(), str(value))
+                        value = str(value)[:80] + ("..." if len(str(value)) > 80 else "")
+                    meta_table.add_row(key.title().replace("_", " "), str(value))
+                    shown_keys.add(key)
                 
                 console.print(meta_table)
                 console.print()
