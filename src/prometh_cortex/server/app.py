@@ -92,12 +92,19 @@ def get_current_config() -> Config:
     global app_config
     
     if app_config is None:
-        # Try to load from environment variable first (set by CLI)
-        config_json = os.getenv("PROMETH_CORTEX_CONFIG")
-        if config_json:
+        # Try to load from config file first (set by CLI), then fall back to standard config
+        config_file_path = os.getenv("PROMETH_CORTEX_CONFIG_FILE")
+        if config_file_path:
             try:
-                config_data = json.loads(config_json)
+                with open(config_file_path) as f:
+                    config_data = json.load(f)
                 app_config = Config(**config_data)
+                # Remove temp file after reading to minimize exposure
+                try:
+                    os.unlink(config_file_path)
+                    del os.environ["PROMETH_CORTEX_CONFIG_FILE"]
+                except OSError:
+                    pass
             except Exception:
                 app_config = load_config()
         else:
@@ -157,10 +164,15 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     # Add CORS middleware for web integration
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # In production, specify allowed origins
+        allow_origins=[
+            "http://localhost:3000",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8080",
+        ],
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["*"],
+        allow_headers=["Authorization", "Content-Type"],
     )
     
     @app.post(
@@ -324,6 +336,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         description="Get server health status and index statistics"
     )
     async def health_check(
+        _: bool = Depends(verify_auth_token),
         config: Config = Depends(get_current_config)
     ):
         """Get server health status and statistics."""

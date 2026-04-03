@@ -74,7 +74,7 @@ def serve(ctx: click.Context, port: int, host: str, reload: bool, access_log: bo
   • POST /prometh_cortex_query - Query the RAG index
   • GET  /prometh_cortex_health - Health check
   
-[bold]Authentication:[/bold] Bearer {config.mcp_auth_token[:8]}...
+[bold]Authentication:[/bold] Bearer token configured
 [bold]Max Results:[/bold] {config.max_query_results}
 
 [dim]Press Ctrl+C to stop the server[/dim]"""
@@ -107,9 +107,16 @@ def serve(ctx: click.Context, port: int, host: str, reload: bool, access_log: bo
         if verbose:
             console.print(f"[dim]Starting server with command: {' '.join(cmd)}[/dim]")
         
-        # Set environment variable for config
+        # Pass config to subprocess without exposing secrets in environment
         import os
-        os.environ["PROMETH_CORTEX_CONFIG"] = str(config.model_dump_json())
+        import tempfile
+        config_data = config.model_dump_json()
+        config_tmpfile = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", prefix="pcortex_", delete=False
+        )
+        config_tmpfile.write(config_data)
+        config_tmpfile.close()
+        os.environ["PROMETH_CORTEX_CONFIG_FILE"] = config_tmpfile.name
         
         # Start server process
         process = subprocess.Popen(cmd)
@@ -122,6 +129,11 @@ def serve(ctx: click.Context, port: int, host: str, reload: bool, access_log: bo
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+            # Clean up temp config file
+            try:
+                os.unlink(config_tmpfile.name)
+            except OSError:
+                pass
             sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
