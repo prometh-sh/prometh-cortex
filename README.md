@@ -19,8 +19,10 @@ Multi-Datalake RAG Indexer with Local MCP Integration
 - [CLI Commands](#cli-commands)
 - [Integration](#integration)
   - [Claude Desktop](#claude-desktop-integration)
+  - [OpenCode](#opencode-integration)
   - [Perplexity](#perplexity-integration)
   - [VSCode](#vscode-with-github-copilot-integration)
+  - [SSE Daemon Mode](#sse-daemon-mode)
 - [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
@@ -36,7 +38,7 @@ Prometh Cortex is a local-first, extensible system for indexing multiple datalak
 - **YAML Frontmatter Parsing**: Rich metadata extraction with structured schema support
 - **Dual Vector Store Support**: Choose between local FAISS or cloud-native Qdrant
 - **Incremental Indexing**: Smart change detection for efficient updates
-- **MCP Server**: Local server compatible with Claude, VSCode, and other tools
+- **MCP Server**: Local server with stdio, SSE, and streamable HTTP transports for Claude, OpenCode, VSCode, and other tools
 - **CLI Interface**: Easy-to-use command line tools for indexing and querying
 - **Performance Optimized**: Target <100ms query response time on M1/M2 Mac
 
@@ -145,6 +147,7 @@ rag_index_dir = "/path/to/index/storage"
 port = 8080
 host = "localhost"
 auth_token = "your-secure-token"
+transport = "stdio"  # "stdio", "sse", or "streamable-http" (v0.4.0+)
 
 [embedding]
 model = "sentence-transformers/all-MiniLM-L6-v2"
@@ -403,10 +406,32 @@ pcortex sources -v
 
 ### Start Servers
 
-#### MCP Server (for Claude Desktop)
+#### MCP Server (for Claude Desktop, OpenCode, Claude Code)
 ```bash
-# Start MCP server with stdio protocol
-pcortex mcp
+# Start MCP server with stdio protocol (default)
+pcortex mcp start
+
+# Start as persistent SSE daemon (v0.4.0+)
+pcortex mcp start --transport sse --port 3100
+
+# SSE on all interfaces (for Tailscale/remote access)
+pcortex mcp start -t sse --host 0.0.0.0 -p 3100
+
+# Streamable HTTP transport (newer MCP spec)
+pcortex mcp start -t streamable-http --port 3100
+```
+
+#### Generate Client Configs (v0.4.0+)
+```bash
+# Generate config for various clients
+pcortex mcp init claude                        # Claude Desktop (stdio)
+pcortex mcp init opencode                      # OpenCode (stdio)
+pcortex mcp init opencode --write              # Write directly to config file
+
+# Generate SSE client configs (for daemon mode)
+pcortex mcp init claude -t sse                 # Claude Desktop (SSE)
+pcortex mcp init opencode -t sse               # OpenCode (SSE)
+pcortex mcp init opencode -t sse --url http://mac-mini.tail:3100  # Remote SSE
 ```
 
 #### HTTP Server (for web integrations)
@@ -423,10 +448,15 @@ pcortex serve --reload
 
 ## Server Types (v0.3.0+)
 
-### MCP Protocol Server (`pcortex mcp`)
-**For Claude Desktop integration**
+### MCP Protocol Server (`pcortex mcp start`)
+**For Claude Desktop, OpenCode, Claude Code, and other MCP clients**
 
-Provides MCP tools via stdio transport:
+Provides MCP tools with configurable transport (v0.4.0+):
+- **stdio** (default): Subprocess per client session, suitable for Claude Desktop
+- **sse**: Persistent daemon with Server-Sent Events, shared across multiple clients
+- **streamable-http**: Newer MCP spec HTTP transport
+
+MCP Tools:
 - **prometh_cortex_query**: Search unified index with optional `source_type` filtering
 - **prometh_cortex_list_sources**: List all sources with statistics (v0.3.0+)
 - **prometh_cortex_health**: Get system health status and unified collection metrics
@@ -707,6 +737,96 @@ Configure Claude Desktop by editing `~/Library/Application Support/Claude/claude
   - Ask: "How many documents are indexed in prometh-cortex?"
   - Ask: "What's the health status of my knowledge base?"
 
+### OpenCode Integration
+
+Generate and install configuration automatically:
+
+```bash
+# Generate OpenCode config (prints to console)
+pcortex mcp init opencode
+
+# Write directly to ~/.config/opencode/mcp.json
+pcortex mcp init opencode --write
+
+# SSE mode (requires running daemon, see SSE Daemon Mode below)
+pcortex mcp init opencode --transport sse
+```
+
+**Manual Configuration**: Add the `"mcp"` section to `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "mcp": {
+    "prometh-cortex": {
+      "type": "local",
+      "command": ["/path/to/pcortex", "mcp", "start"],
+      "environment": {
+        "RAG_INDEX_DIR": "/path/to/index/storage",
+        "VECTOR_STORE_TYPE": "qdrant",
+        "QDRANT_HOST": "your-cluster.qdrant.io",
+        "QDRANT_PORT": "6333",
+        "QDRANT_COLLECTION_NAME": "prometh_cortex",
+        "QDRANT_API_KEY": "your-api-key",
+        "QDRANT_USE_HTTPS": "true",
+        "MCP_AUTH_TOKEN": "your-secure-token",
+        "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
+        "MAX_QUERY_RESULTS": "10"
+      },
+      "enabled": true,
+      "timeout": 60000
+    }
+  }
+}
+```
+
+**Remote Mode** (for persistent SSE daemon):
+```json
+{
+  "mcp": {
+    "prometh-cortex": {
+      "type": "remote",
+      "url": "http://127.0.0.1:3100/sse",
+      "headers": {
+        "Authorization": "Bearer your-secure-token"
+      },
+      "enabled": true,
+      "timeout": 60000
+    }
+  }
+}
+```
+
+### SSE Daemon Mode
+
+Run Cortex as a persistent daemon instead of spawning per client session (v0.4.0+). This gives you single startup cost, shared Qdrant connections, and no duplicate vector index loads.
+
+**1. Start the daemon:**
+```bash
+pcortex mcp start --transport sse --port 3100
+
+# Or bind to all interfaces for Tailscale/remote access
+pcortex mcp start -t sse --host 0.0.0.0 -p 3100
+```
+
+**2. Configure clients to connect via SSE:**
+```bash
+# Claude Code
+claude mcp add --transport sse prometh-cortex http://127.0.0.1:3100/sse
+
+# OpenCode
+pcortex mcp init opencode -t sse --write
+
+# Claude Desktop
+pcortex mcp init claude -t sse --write
+
+# Remote access (e.g., via Tailscale)
+pcortex mcp init opencode -t sse --url http://mac-mini.tail:3100
+```
+
+**3. (Optional) Run as macOS launchd service:**
+
+Create `~/Library/LaunchAgents/sh.prometh.cortex-mcp.plist` for auto-start on boot with keepalive.
+
 ### Claude.ai Web Integration
 
 Configure Claude.ai to use your MCP server by adding it as a custom integration:
@@ -937,10 +1057,12 @@ Create `.vscode/tasks.json` for quick queries:
 
 **Two Server Types Available**:
 
-1. **MCP Protocol Server** (`pcortex mcp`):
-   - **Purpose**: AI assistant integration (Claude Desktop, VSCode MCP)
-   - **Protocol**: stdio-based MCP
-   - **Port**: No network port (stdio communication)
+1. **MCP Protocol Server** (`pcortex mcp start`):
+   - **Purpose**: AI assistant integration (Claude Desktop, OpenCode, Claude Code, VSCode)
+   - **Transports** (v0.4.0+):
+     - `stdio` (default): Subprocess per client, no network port
+     - `sse`: Persistent daemon on configurable host:port, shared across clients
+     - `streamable-http`: Newer MCP spec transport
    - **Usage**: Direct integration with MCP-compatible clients
 
 2. **HTTP REST Server** (`pcortex serve`):
@@ -1140,10 +1262,20 @@ mypy src/
 └──────────┬──────────────────┘
            │
 ┌──────────▼──────────────────┐
-│     MCP Local Server        │
-│ - /prometh_cortex_query     │
-│ - /prometh_cortex_health    │
-└─────────────────────────────┘
+│     MCP Server              │
+│ - stdio / SSE / HTTP        │
+│ - prometh_cortex_query      │
+│ - prometh_cortex_health     │
+│ - prometh_cortex_sources    │
+└──────────┬──────────────────┘
+           │
+    ┌──────┼──────┐
+    │      │      │
+  stdio   SSE   HTTP
+    │      │      │
+ Claude  Multi   REST
+Desktop client  API
+         daemon
 ```
 
 ## License
@@ -1181,6 +1313,12 @@ Found a security vulnerability? Please see [SECURITY.md](SECURITY.md) for respon
 **Migration Guides**:
 - **[v0.2.0 → v0.3.0 Migration Guide](docs/migration-v0.2-to-v0.3.md)** - Step-by-step guide for migrating from multi-collection to unified collection
 - **[v0.1.x → v0.2.0 Migration Guide](docs/migration-v0.1-to-v0.2.md)** - Historical migration guide (archived)
+
+**Key Improvements in v0.4.0**:
+- **SSE/HTTP Transport**: Run MCP as a persistent daemon shared across clients
+- **OpenCode Support**: First-class config generation for OpenCode
+- **Auto Config**: `pcortex mcp init <target>` generates configs for Claude, OpenCode, VSCode, Codex, Perplexity
+- **Remote Access**: SSE daemon with `--host 0.0.0.0` for Tailscale/multi-machine setups
 
 **Key Improvements in v0.3.0**:
 - **Unified Collection**: Single FAISS/Qdrant index instead of multiple

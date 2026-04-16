@@ -1,30 +1,28 @@
-# Prometh Cortex Configuration Sample
-# Copy this file to config.toml and customize for your environment
-
-[datalake]
-# Add your document directories here - supports multiple paths
-repos = [
-    "/path/to/your/notes",
-    "/path/to/your/documents", 
-    "/path/to/your/projects"
-]
+# Prometh Cortex Configuration Sample (v0.4.0)
+# Copy this file to ~/.config/prometh-cortex/config.toml and customize for your environment
+#   pcortex config --init    # Creates the config directory
+#   pcortex config --sample  # Generates this sample
 
 [storage]
-# Directory where RAG index will be stored
+# Directory where RAG index will be stored (used by FAISS backend)
 rag_index_dir = "/path/to/index/storage"
 
 [server]
 # MCP and HTTP server configuration
 port = 8080
 host = "localhost"
-auth_token = "your-secure-token-here"
+auth_token = "your-secure-token-here"     # Required for SSE/HTTP transports. Generate with: openssl rand -hex 32
+transport = "stdio"                        # "stdio" (default), "sse", or "streamable-http"
+# When transport = "sse" or "streamable-http":
+#   - The server listens on host:port as a persistent daemon
+#   - auth_token is REQUIRED and enforced on all connections
+#   - Clients must send: Authorization: Bearer <auth_token>
+#   - Use host = "0.0.0.0" to allow remote access (e.g. via Tailscale)
 
 [embedding]
-# Embedding model and chunking configuration
+# Embedding model and search configuration
 model = "sentence-transformers/all-MiniLM-L6-v2"
 max_query_results = 10
-chunk_size = 512
-chunk_overlap = 50
 
 [vector_store]
 # Vector store backend: "faiss" (local) or "qdrant" (scalable)
@@ -36,9 +34,9 @@ host = "localhost"
 port = 6333
 collection_name = "prometh_cortex"
 # api_key = "your-qdrant-api-key"  # For Qdrant Cloud
-# use_https = true  # For Qdrant Cloud
+# use_https = true                  # For Qdrant Cloud
 
-# FAISS configuration (when type = "faiss") 
+# FAISS configuration (when type = "faiss")
 [vector_store.faiss]
 # FAISS uses local file storage - no additional config needed
 
@@ -66,5 +64,61 @@ cleanup_interval_seconds = 300      # Cleanup interval (5 minutes)
 
 [mcp.startup]
 # Startup optimization settings
-max_startup_time = 50.0             # Maximum server startup time in seconds
+max_startup_time = 10.0             # Maximum server startup time in seconds
 lazy_load_index = true              # Enable lazy loading of index
+
+# ============================================================================
+# UNIFIED COLLECTION & DOCUMENT SOURCES CONFIGURATION (v0.3.0+)
+# ============================================================================
+# Single collection with per-source chunking configuration.
+# Documents are automatically routed to sources based on source_patterns.
+# Uses longest-prefix-match: more specific patterns take precedence.
+# At least one source should have source_patterns = ["*"] as catch-all.
+
+# Single unified collection
+[[collections]]
+name = "prometh_cortex"
+
+# Source: Knowledge Base (larger chunks for long-form docs)
+[[sources]]
+name = "knowledge_base"
+chunk_size = 768
+chunk_overlap = 76
+source_patterns = [
+  "/path/to/your/docs/concepts",
+  "/path/to/your/docs/runbooks",
+]
+
+# Source: Meetings (medium chunks)
+[[sources]]
+name = "meetings"
+chunk_size = 512
+chunk_overlap = 51
+source_patterns = [
+  "/path/to/your/meetings",
+]
+
+# Source: Todos/Reminders (larger chunks for structured content)
+[[sources]]
+name = "todos"
+chunk_size = 2048
+chunk_overlap = 200
+source_patterns = [
+  "/path/to/your/reminders",
+]
+
+# Source: Projects
+[[sources]]
+name = "projects"
+chunk_size = 640
+chunk_overlap = 64
+source_patterns = [
+  "/path/to/your/projects",
+]
+
+# Source: Default catch-all (for unmatched documents)
+# [[sources]]
+# name = "default"
+# chunk_size = 512
+# chunk_overlap = 50
+# source_patterns = ["*"]
