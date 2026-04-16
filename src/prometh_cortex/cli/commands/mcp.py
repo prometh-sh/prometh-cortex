@@ -22,22 +22,65 @@ def mcp(ctx: click.Context):
 
 
 @mcp.command()
+@click.option(
+    "--transport", "-t",
+    type=click.Choice(["stdio", "sse", "streamable-http"], case_sensitive=False),
+    default=None,
+    help="Transport protocol (default: stdio, or MCP_TRANSPORT env var)"
+)
+@click.option(
+    "--host",
+    default=None,
+    help="Host to bind to for SSE/HTTP transports (default: 127.0.0.1, or MCP_HOST env var)"
+)
+@click.option(
+    "--port", "-p",
+    type=int,
+    default=None,
+    help="Port to bind to for SSE/HTTP transports (default: 3100, or MCP_PORT env var)"
+)
 @click.pass_context
-def start(ctx: click.Context):
-    """Start the MCP server for Claude Desktop integration.
-    
-    This starts a stdio-based MCP server that implements the Model Context Protocol
-    for integration with Claude Desktop and other MCP-compatible clients.
-    
-    The server provides two tools:
-    - prometh_cortex_query: Search indexed documents
-    - prometh_cortex_health: Get system health status
+def start(ctx: click.Context, transport: str, host: str, port: int):
+    """Start the MCP server.
+
+    Supports stdio (default), SSE, and streamable-http transports.
+
+    \b
+    Examples:
+      pcortex mcp start                              # stdio (Claude Desktop)
+      pcortex mcp start -t sse                        # SSE on 127.0.0.1:3100
+      pcortex mcp start -t sse --host 0.0.0.0 -p 3200  # SSE on all interfaces
+      pcortex mcp start -t streamable-http            # Streamable HTTP
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
-    
+
+    # Resolve transport: CLI flag > config > default
+    transport = transport or config.mcp_transport or "stdio"
+    host = host or (config.mcp_host if config.mcp_host != "localhost" else "127.0.0.1")
+    port = port or config.mcp_port or 3100
+
+    # Security checks for network transports
+    if transport != "stdio":
+        if not config.mcp_auth_token:
+            console.print(
+                "[bold red]ERROR:[/bold red] MCP_AUTH_TOKEN must be set when using "
+                f"{transport} transport. Set it via MCP_AUTH_TOKEN env var or "
+                "[server] auth_token in config.toml.",
+                highlight=False
+            )
+            sys.exit(1)
+
+        if host == "0.0.0.0":
+            console.print(
+                "[bold yellow]WARNING:[/bold yellow] Binding to 0.0.0.0 exposes the MCP "
+                "server on all network interfaces. Ensure your firewall restricts "
+                "access to trusted hosts.",
+                highlight=False
+            )
+
     if verbose:
-        console.print("[bold blue]Starting MCP server for Claude Desktop...[/bold blue]")
+        console.print(f"[bold blue]Starting MCP server ({transport} transport)...[/bold blue]")
     
     # Check if index exists (different for FAISS vs Qdrant)
     if config.vector_store_type == "qdrant":
@@ -58,9 +101,9 @@ def start(ctx: click.Context):
     
     try:
         from prometh_cortex.mcp.server import run_mcp_server
-        
-        # Run the MCP server (this will block and handle stdio communication)
-        run_mcp_server()
+
+        # Run the MCP server (blocks until shutdown)
+        run_mcp_server(transport=transport, host=host, port=port)
         
     except ImportError as e:
         console.print(f"[red]✗[/red] Failed to import MCP server: {e}")
@@ -75,7 +118,7 @@ def start(ctx: click.Context):
 
 
 @mcp.command()
-@click.argument("target", type=click.Choice(["claude", "vscode", "codex", "perplexity"]))
+@click.argument("target", type=click.Choice(["claude", "vscode", "codex", "perplexity", "opencode"]))
 @click.option(
     "--output", "-o",
     type=click.Path(),
@@ -86,19 +129,31 @@ def start(ctx: click.Context):
     is_flag=True,
     help="Write to standard configuration location"
 )
+@click.option(
+    "--transport", "-t",
+    type=click.Choice(["stdio", "sse", "streamable-http"], case_sensitive=False),
+    default="stdio",
+    help="Transport mode for client config (default: stdio)"
+)
+@click.option(
+    "--url",
+    default=None,
+    help="SSE/HTTP server URL (default: http://127.0.0.1:3100)"
+)
 @click.pass_context
-def init(ctx: click.Context, target: str, output: str, write: bool):
+def init(ctx: click.Context, target: str, output: str, write: bool, transport: str, url: str):
     """Generate MCP configuration for various clients.
-    
-    TARGET: Configuration target (claude, vscode, codex, perplexity)
-    
-    Examples:
+
+    TARGET: Configuration target (claude, vscode, codex, perplexity, opencode)
+
     \b
-    pcortex mcp init claude                      # Print Claude config
-    pcortex mcp init claude --write              # Write to Claude config file  
-    pcortex mcp init vscode -o settings.json    # Save VSCode config
-    pcortex mcp init codex --write               # Write to Codex config file
-    pcortex mcp init perplexity --write          # Write to Perplexity config file
+    Examples:
+      pcortex mcp init claude                        # stdio config for Claude Desktop
+      pcortex mcp init opencode                      # stdio config for OpenCode
+      pcortex mcp init opencode --write              # Write directly to OpenCode config
+      pcortex mcp init claude -t sse                 # SSE config for Claude Desktop
+      pcortex mcp init opencode -t sse               # SSE config for OpenCode
+      pcortex mcp init opencode -t sse --url http://mac-mini.tail:3100
     """
     config = ctx.obj["config"]
     verbose = ctx.obj["verbose"]
@@ -108,9 +163,9 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
     
     try:
         from .mcp_generators import generate_config
-        
+
         # Generate configuration for the target
-        config_data, default_path = generate_config(target, config)
+        config_data, default_path = generate_config(target, config, transport=transport, url=url)
         
         if write:
             # Write to standard location
@@ -121,7 +176,7 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Handle merging with existing config if needed
-            if output_path.exists() and target in ["claude", "vscode", "codex", "perplexity"]:
+            if output_path.exists() and target in ["claude", "vscode", "codex", "perplexity", "opencode"]:
                 try:
                     with open(output_path, 'r') as f:
                         content = f.read()
@@ -167,6 +222,11 @@ def init(ctx: click.Context, target: str, output: str, write: bool):
                 elif target == "perplexity":
                     # Perplexity uses simple JSON format, just overwrite
                     pass  # config_data already contains the new configuration
+                elif target == "opencode":
+                    if "mcp" not in existing:
+                        existing["mcp"] = {}
+                    existing["mcp"].update(config_data["mcp"])
+                    config_data = existing
             
             with open(output_path, 'w') as f:
                 if target == "codex":

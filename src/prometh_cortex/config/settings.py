@@ -71,6 +71,10 @@ class Config(BaseModel):
         default="localhost",
         description="Host for MCP server"
     )
+    mcp_transport: str = Field(
+        default="stdio",
+        description="MCP transport protocol: stdio, sse, or streamable-http"
+    )
     mcp_auth_token: Optional[str] = Field(
         default=None,
         description="Authentication token for MCP server"
@@ -372,7 +376,15 @@ def _load_from_env() -> Config:
     
     if mcp_host := os.getenv("MCP_HOST"):
         config_data["mcp_host"] = mcp_host
-    
+
+    if mcp_transport := os.getenv("MCP_TRANSPORT"):
+        valid_transports = ("stdio", "sse", "streamable-http")
+        if mcp_transport not in valid_transports:
+            raise ConfigValidationError(
+                f"Invalid MCP_TRANSPORT value: {mcp_transport}. Must be one of: {', '.join(valid_transports)}"
+            )
+        config_data["mcp_transport"] = mcp_transport
+
     if mcp_auth_token := os.getenv("MCP_AUTH_TOKEN"):
         config_data["mcp_auth_token"] = mcp_auth_token
     
@@ -578,9 +590,11 @@ def config_to_env_vars(config: Config) -> Dict[str, str]:
         env_vars["MCP_PORT"] = str(config.mcp_port)
     if config.mcp_host:
         env_vars["MCP_HOST"] = config.mcp_host
+    if config.mcp_transport and config.mcp_transport != "stdio":
+        env_vars["MCP_TRANSPORT"] = config.mcp_transport
     if config.mcp_auth_token:
         env_vars["MCP_AUTH_TOKEN"] = config.mcp_auth_token
-    
+
     # Embedding configuration
     if config.embedding_model:
         env_vars["EMBEDDING_MODEL"] = config.embedding_model
@@ -683,7 +697,16 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
             config_data["mcp_host"] = server["host"]
         if "auth_token" in server:
             config_data["mcp_auth_token"] = server["auth_token"]
-    
+        if "transport" in server:
+            transport_value = server["transport"]
+            valid_transports = ("stdio", "sse", "streamable-http")
+            if transport_value not in valid_transports:
+                raise ConfigValidationError(
+                    f"Invalid [server] transport value: '{transport_value}'. "
+                    f"Must be one of: {', '.join(valid_transports)}"
+                )
+            config_data["mcp_transport"] = transport_value
+
     # Embedding configuration
     if "embedding" in toml_data:
         embedding = toml_data["embedding"]

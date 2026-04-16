@@ -78,6 +78,7 @@ config.toml
 # Temporary files
 *.tmp
 *.log
+uv.*
 
 # Local configuration and overrides
 *.local

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
+from fastmcp.server.auth import AccessToken, TokenVerifier
 
 from prometh_cortex.config import load_config
 from prometh_cortex.indexer import DocumentIndexer, IndexerError
@@ -52,6 +53,28 @@ mcp = FastMCP("prometh-cortex")
 progress_reporter = None
 startup_optimizer = None
 cleanup_task = None
+
+
+class StaticBearerTokenVerifier(TokenVerifier):
+    """Simple bearer token verifier that checks against a static secret.
+
+    This is used when running the MCP server with SSE or streamable-http
+    transport to enforce authentication on all incoming connections.
+    Clients must send the token as a Bearer token in the Authorization header.
+    """
+
+    def __init__(self, token: str):
+        super().__init__()
+        self._token = token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if token == self._token:
+            return AccessToken(
+                token=token,
+                client_id="bearer-auth",
+                scopes=[],
+            )
+        return None
 
 
 async def initialize_server():
@@ -503,8 +526,14 @@ async def prometh_cortex_health() -> Dict[str, Any]:
         }
 
 
-def run_mcp_server():
-    """Run the MCP server with stdio transport."""
+def run_mcp_server(transport: str = "stdio", host: str = "127.0.0.1", port: int = 3100):
+    """Run the MCP server with the specified transport.
+
+    Args:
+        transport: Transport protocol - "stdio", "sse", or "streamable-http"
+        host: Host to bind to (only used for sse/streamable-http)
+        port: Port to bind to (only used for sse/streamable-http)
+    """
     # Completely silent startup for MCP protocol compatibility
     startup_start_time = time.time()
     
@@ -548,8 +577,22 @@ def run_mcp_server():
         else:
             logger.critical(f"✅ Startup within target: {total_startup_time:.2f}s < {max_startup_time:.2f}s")
         
-        # Run the synchronous MCP server
-        mcp.run(transport="stdio")
+        # Run the MCP server with specified transport
+        if transport == "stdio":
+            mcp.run(transport="stdio")
+        else:
+            # Enforce authentication for network transports
+            if not config or not config.mcp_auth_token:
+                logger.critical(
+                    "MCP_AUTH_TOKEN must be set when using SSE or streamable-http transport. "
+                    "Set MCP_AUTH_TOKEN env var or auth_token in [server] config."
+                )
+                sys.exit(1)
+
+            auth_verifier = StaticBearerTokenVerifier(config.mcp_auth_token)
+            mcp.auth = auth_verifier
+            logger.critical(f"Starting MCP server on {host}:{port} with {transport} transport (auth enabled)")
+            mcp.run(transport=transport, host=host, port=port)
         
     except Exception as e:
         total_startup_time = time.time() - startup_start_time

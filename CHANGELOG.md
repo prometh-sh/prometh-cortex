@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-16
+
+### Added
+- **SSE Transport**: MCP server now supports Server-Sent Events transport via `pcortex mcp start --transport sse`, enabling persistent daemon mode with shared Qdrant connections across multiple clients
+- **Streamable HTTP Transport**: Alternative HTTP-based MCP transport via `--transport streamable-http` for clients that support the newer MCP spec
+- **OpenCode Config Generator**: New `pcortex mcp init opencode` target generates MCP configuration for OpenCode with correct JSON structure (`"mcp"` wrapper, array command, `"environment"` key)
+- **SSE Client Config Generation**: All `pcortex mcp init` targets now accept `--transport sse` to generate lightweight SSE client configs (no executable path or env vars needed)
+- **Custom SSE URL**: `pcortex mcp init <target> --transport sse --url http://host:port` for remote/Tailscale access
+- **Transport CLI Options**: `pcortex mcp start` now accepts `--transport/-t`, `--host`, and `--port/-p` flags
+- **MCP_TRANSPORT Config**: New `MCP_TRANSPORT` environment variable and TOML `[server] transport` setting
+
+### Changed
+- **`run_mcp_server()` Signature**: Now accepts `transport`, `host`, and `port` parameters (backward compatible, defaults to stdio)
+- **Config Generator API**: All `generate_*_config()` functions accept `transport` and `url` keyword arguments
+
+### Security
+- **SSE/HTTP Auth Enforcement**: Bearer token authentication required on all non-stdio transports via `StaticBearerTokenVerifier`; server refuses to start without `MCP_AUTH_TOKEN` when using SSE or streamable-http
+- **0.0.0.0 Binding Warning**: Runtime warning when binding to all interfaces on network transports
+- **TOML Transport Validation**: `[server] transport` value now validated against allowlist (consistent with `MCP_TRANSPORT` env var)
+
 ## [0.3.0] - 2025-12-19
 
 ### Added
