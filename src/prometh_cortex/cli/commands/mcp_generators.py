@@ -386,7 +386,7 @@ Usage in Perplexity:
 """,
         "opencode": """
 Usage in OpenCode:
-1. Copy the generated configuration to ~/.config/opencode/mcp.json
+1. Copy the generated configuration to ~/.config/opencode/opencode.json
 2. Restart OpenCode or reload MCP configuration
 3. Use tools: "Search my documents for..." or "Check prometh-cortex health"
 """,

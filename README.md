@@ -745,7 +745,7 @@ Generate and install configuration automatically:
 # Generate OpenCode config (prints to console)
 pcortex mcp init opencode
 
-# Write directly to ~/.config/opencode/mcp.json
+# Write directly to ~/.config/opencode/opencode.json
 pcortex mcp init opencode --write
 
 # SSE mode (requires running daemon, see SSE Daemon Mode below)
