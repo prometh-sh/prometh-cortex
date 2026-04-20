@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prometh-cortex"
-version = "0.4.0"
+version = "0.5.0"
 description = "Multi-Datalake RAG Indexer with Unified Collection & Per-Source Chunking - MCP & HTTP Server"
 authors = [
     {name = "Ivan Nagy", email = "prometh-cortex@prometh.sh"},
@@ -64,9 +64,9 @@ dev = [
 pcortex = "prometh_cortex.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/ivannagy/prometh-cortex"
-Repository = "https://github.com/ivannagy/prometh-cortex.git"
-Issues = "https://github.com/ivannagy/prometh-cortex/issues"
+Homepage = "https://github.com/prometh-sh/prometh-cortex"
+Repository = "https://github.com/prometh-sh/prometh-cortex.git"
+Issues = "https://github.com/prometh-sh/prometh-cortex/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/prometh_cortex"]

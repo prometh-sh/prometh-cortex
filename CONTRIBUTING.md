@@ -5,6 +5,7 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
 ## Getting Started
 
 ### Prerequisites
+
 - Python 3.9 or higher
 - Git for version control
 - Basic knowledge of Python, RAG systems, and vector databases
@@ -13,12 +14,14 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
 ### Setup
 
 1. **Fork and clone the repository**
+
    ```bash
-   git clone https://github.com/ivannagy/prometh-cortex.git
+   git clone https://github.com/prometh-sh/prometh-cortex.git
    cd prometh-cortex
    ```
 
 2. **Create a virtual environment**
+
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # On macOS/Linux
@@ -27,22 +30,26 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
    ```
 
 3. **Install in development mode**
+
    ```bash
    pip install -e ".[dev]"
    ```
 
 4. **Install pre-commit hooks**
+
    ```bash
    pre-commit install
    ```
 
 5. **Set up configuration**
+
    ```bash
    cp config.toml.sample config.toml
    # Edit config.toml with your test datalake paths
    ```
 
 6. **Build test index**
+
    ```bash
    pcortex build --force
    ```
@@ -59,6 +66,7 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
 ### Submitting Changes
 
 1. **Create a feature branch**
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -70,6 +78,7 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
    - Follow PEP 8 style guidelines
 
 3. **Test your changes**
+
    ```bash
    # Run unit tests
    pytest tests/unit/
@@ -86,6 +95,7 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
    ```
 
 4. **Check code quality**
+
    ```bash
    # Format code
    black src/ tests/
@@ -105,6 +115,7 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
    - Add docstrings to new functions/classes
 
 6. **Commit your changes**
+
    ```bash
    git add .
    git commit -m "feat: Brief description of your changes"
@@ -119,9 +130,11 @@ Thank you for your interest in contributing to Prometh Cortex! This document pro
    - `perf:` for performance improvements
 
 7. **Push and create Pull Request**
+
    ```bash
    git push origin feature/your-feature-name
    ```
+
    - Open a Pull Request on GitHub
    - Provide a clear description of changes
    - Reference any related issues
@@ -154,6 +167,7 @@ src/prometh_cortex/
 - **Imports**: Use absolute imports, organize with isort
 
 Example:
+
 ```python
 from typing import List, Optional
 import logging
@@ -189,6 +203,7 @@ def process_documents(paths: List[str], max_results: Optional[int] = None) -> Li
 - **Mocking**: Mock external dependencies (file system, network, etc.)
 
 Example test structure:
+
 ```python
 import pytest
 from prometh_cortex.parser import YAMLParser
@@ -229,6 +244,7 @@ When adding new features:
 We welcome contributions in these areas:
 
 ### Core Features
+
 - New vector store backends (e.g., Pinecone, Weaviate)
 - Enhanced YAML frontmatter schema support
 - Improved incremental indexing algorithms
@@ -236,6 +252,7 @@ We welcome contributions in these areas:
 - Performance optimizations for large datalakes
 
 ### Integrations
+
 - Additional MCP tools and capabilities
 - New HTTP API endpoints
 - Integration guides for other platforms
@@ -243,6 +260,7 @@ We welcome contributions in these areas:
 - Browser extension development
 
 ### Documentation
+
 - Improved README.md sections
 - Additional usage examples and tutorials
 - Architecture diagrams and flow charts
@@ -250,6 +268,7 @@ We welcome contributions in these areas:
 - API reference documentation
 
 ### Testing & Quality
+
 - Increase test coverage
 - Add performance benchmarks
 - Integration tests for vector stores
@@ -257,6 +276,7 @@ We welcome contributions in these areas:
 - Cross-platform compatibility testing
 
 ### Developer Experience
+
 - Better error messages and debugging
 - Development containers (Docker)
 - GitHub Actions CI/CD pipeline
@@ -274,10 +294,10 @@ When contributing features or behavior changes:
 
 ## Questions?
 
-- Open a [GitHub Issue](https://github.com/ivannagy/prometh-cortex/issues) for general questions
+- Open a [GitHub Issue](https://github.com/prometh-sh/prometh-cortex/issues) for general questions
 - Check existing documentation in [README.md](README.md) and [CLAUDE.md](CLAUDE.md)
 - Review [SECURITY.md](SECURITY.md) for security-related questions
-- Join [GitHub Discussions](https://github.com/ivannagy/prometh-cortex/discussions) for community support
+- Join [GitHub Discussions](https://github.com/prometh-sh/prometh-cortex/discussions) for community support
 
 ## Code of Conduct
 
@@ -290,6 +310,7 @@ By contributing to Prometh Cortex, you agree that your contributions will be lic
 ## Recognition
 
 Contributors will be recognized in:
+
 - Project README.md contributors section
 - Release notes for significant contributions
 - GitHub contributor graphs
