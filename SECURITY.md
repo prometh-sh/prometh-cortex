@@ -21,8 +21,8 @@ The Prometh Cortex team takes security seriously. If you discover a security vul
 
 Instead, please report security issues via one of these methods:
 
-1. **Email**: Send details to **786743+ivannagy@users.noreply.github.com**
-2. **GitHub Security Advisories**: Use the [Security Advisory](https://github.com/ivannagy/prometh-cortex/security/advisories/new) feature
+1. **Email**: Send details to **<786743+ivannagy@users.noreply.github.com>**
+2. **GitHub Security Advisories**: Use the [Security Advisory](https://github.com/prometh-sh/prometh-cortex/security/advisories/new) feature
 
 ### What to Include
 
@@ -56,18 +56,21 @@ When reporting a vulnerability, please include:
 ### Authentication & Authorization
 
 #### HTTP Server Security
+
 - **Bearer Tokens**: Always use strong, randomly generated authentication tokens
 - **Token Storage**: Store tokens securely in `config.toml` (gitignored by default)
 - **Token Rotation**: Rotate tokens regularly, especially after exposure
 - **Network Binding**: Bind to `localhost` for local-only access, use firewall rules for remote access
 
 Example secure token generation:
+
 ```bash
 # Generate a secure random token
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 #### MCP Integration Security
+
 - **Local Only**: MCP servers run locally via stdio (no network exposure)
 - **No Authentication**: MCP uses stdio transport (inherently local)
 - **Environment Variables**: Keep environment-based configurations private
@@ -75,12 +78,14 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ### Data Security
 
 #### Document Processing
+
 - **Sensitive Data**: Be cautious when indexing documents containing PII, credentials, or secrets
 - **YAML Frontmatter**: Review metadata before indexing (author names, emails, etc.)
 - **Index Storage**: Protect `.rag_index/` directory (contains document embeddings)
 - **Qdrant Cloud**: Use encryption in transit (HTTPS) and at rest for cloud deployments
 
 #### Best Practices for Private Data
+
 - **Gitignore**: Ensure `config.toml`, `.rag_index/`, and `qdrant_storage/` are gitignored
 - **Access Control**: Restrict file system permissions on index directories
 - **Sanitization**: Review documents before indexing to remove sensitive information
@@ -89,12 +94,14 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ### Network Security
 
 #### HTTP Server
+
 - **Localhost Binding**: Default binding to `localhost:8080` (local access only)
 - **Remote Access**: If exposing remotely, use reverse proxy with TLS (nginx, Caddy)
 - **CORS Configuration**: Restrict CORS origins in production deployments
 - **Rate Limiting**: Consider rate limiting for production HTTP endpoints
 
 #### Qdrant Vector Store
+
 - **Local Docker**: Use network isolation for local Qdrant containers
 - **Cloud Qdrant**: Always use API keys and HTTPS connections
 - **API Key Storage**: Store Qdrant API keys in `config.toml` (never commit to git)
@@ -111,6 +118,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ### Deployment Recommendations
 
 #### Development
+
 ```toml
 [server]
 host = "localhost"
@@ -119,6 +127,7 @@ auth_token = "dev-token-only"  # Weak token OK for local dev
 ```
 
 #### Production
+
 ```toml
 [server]
 host = "127.0.0.1"  # Local only, use reverse proxy for external access
@@ -148,20 +157,26 @@ Security updates will be:
 ## Common Security Questions
 
 ### Q: Is my data sent to external servers?
+
 **A**: No. All embedding generation and vector indexing happens locally or in your chosen vector store (FAISS local or Qdrant). No document content is sent to external APIs.
 
 ### Q: What data does the HTTP server expose?
+
 **A**: The HTTP server exposes search results from your indexed documents. Protect the server with authentication tokens and network controls.
 
 ### Q: Can I use this in a corporate environment?
+
 **A**: Yes, with appropriate security controls:
+
 - Use local FAISS storage or on-premises Qdrant
 - Bind HTTP server to localhost only
 - Review documents before indexing to exclude confidential information
 - Use strong authentication tokens
 
 ### Q: How do I secure my Qdrant deployment?
+
 **A**:
+
 - Use API keys for authentication
 - Enable HTTPS/TLS encryption
 - Use network isolation for Docker deployments
@@ -184,7 +199,7 @@ Before deploying Prometh Cortex:
 
 ## Additional Resources
 
-- [GitHub Security](https://github.com/ivannagy/prometh-cortex/security)
+- [GitHub Security](https://github.com/prometh-sh/prometh-cortex/security)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Contributing Guidelines](CONTRIBUTING.md)
 - [Model Context Protocol Security](https://modelcontextprotocol.io/docs/security)

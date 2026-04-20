@@ -2,25 +2,25 @@
 
 import json
 import logging
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple
 from copy import deepcopy
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 from prometh_cortex.config import Config, SourceConfig
-from prometh_cortex.router import DocumentRouter, RouterError
 from prometh_cortex.parser import (
     MarkdownDocument,
-    parse_markdown_file,
-    extract_document_chunks,
-    QueryParser,
     ParsedQuery,
+    QueryParser,
+    extract_document_chunks,
+    parse_markdown_file,
 )
+from prometh_cortex.router import DocumentRouter, RouterError
 from prometh_cortex.vector_store import (
-    VectorStoreInterface,
     DocumentChange,
     DocumentChangeDetector,
+    VectorStoreInterface,
     create_vector_store,
 )
 
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 class IndexerError(Exception):
     """Raised when indexer operations fail."""
+
     pass
 
 
@@ -60,9 +61,10 @@ class DocumentIndexer:
 
     def _initialize_embedding_model(self) -> None:
         """Initialize the embedding model."""
-        import warnings
         import os
         import sys
+        import warnings
+
         try:
             # Suppress noisy HuggingFace/sentence-transformers warnings
             os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -154,9 +156,7 @@ class DocumentIndexer:
 
         return sorted(document_paths)
 
-    def _route_documents(
-        self, document_paths: List[str]
-    ) -> Dict[str, List[str]]:
+    def _route_documents(self, document_paths: List[str]) -> Dict[str, List[str]]:
         """
         Route documents to their sources.
 
@@ -166,7 +166,9 @@ class DocumentIndexer:
         Returns:
             Dictionary mapping source names to list of document paths
         """
-        routed: Dict[str, List[str]] = {source.name: [] for source in self.config.sources}
+        routed: Dict[str, List[str]] = {
+            source.name: [] for source in self.config.sources
+        }
 
         for doc_path in document_paths:
             try:
@@ -196,6 +198,7 @@ class DocumentIndexer:
         try:
             # Get file metadata for change detection
             import os
+
             file_stat = os.stat(file_path)
             modified_time = file_stat.st_mtime
 
@@ -286,7 +289,7 @@ class DocumentIndexer:
     def build_index(
         self,
         force_rebuild: bool = False,
-        progress_callback: Optional[Callable[[str, str, Any], None]] = None
+        progress_callback: Optional[Callable[[str, str, Any], None]] = None,
     ) -> Dict[str, Any]:
         """
         Build unified index from all sources.
@@ -317,13 +320,15 @@ class DocumentIndexer:
                 "sources": {},
             }
 
-            # Force rebuild: clear entire index
+            # Force rebuild: clear entire index (but preserve memories)
             if force_rebuild:
                 logger.info("Performing full rebuild of unified index")
-                self._clear_index()
+                self._clear_index(preserve_memory=True)
 
             # Build unified index with per-document chunking
-            index_stats = self._build_unified_index(routed_docs, force_rebuild, progress_callback)
+            index_stats = self._build_unified_index(
+                routed_docs, force_rebuild, progress_callback
+            )
 
             stats.update(index_stats)
 
@@ -385,11 +390,16 @@ class DocumentIndexer:
                         source_stats["chunks"] += result["chunks"]
                         # Update change detector metadata for incremental indexing
                         from prometh_cortex.vector_store.interface import DocumentChange
+
                         change = DocumentChange(
                             file_path=doc_path,
-                            change_type="add" if doc_path not in self.change_detector.indexed_docs else "update",
+                            change_type=(
+                                "add"
+                                if doc_path not in self.change_detector.indexed_docs
+                                else "update"
+                            ),
                             file_hash=result.get("file_hash"),
-                            modified_time=result.get("modified_time")
+                            modified_time=result.get("modified_time"),
                         )
                         self.change_detector.update_metadata([change])
 
@@ -403,7 +413,11 @@ class DocumentIndexer:
 
             except Exception as e:
                 logger.error(f"Failed to process source '{source_name}': {e}")
-                stats["sources"][source_name] = {"documents": 0, "chunks": 0, "error": str(e)}
+                stats["sources"][source_name] = {
+                    "documents": 0,
+                    "chunks": 0,
+                    "error": str(e),
+                }
 
                 # Report error in source processing
                 if progress_callback:
@@ -411,14 +425,30 @@ class DocumentIndexer:
 
         return stats
 
-    def _clear_index(self) -> None:
-        """Clear the unified index."""
+    def _clear_index(self, preserve_memory: bool = True) -> None:
+        """Clear the unified index.
+
+        Args:
+            preserve_memory: If True, preserve prmth_memory documents during clear.
+                Useful during force rebuilds to keep session memories intact.
+        """
         try:
-            if hasattr(self.vector_store, "delete_collection"):
+            if preserve_memory and hasattr(
+                self.vector_store, "delete_documents_except_source"
+            ):
+                # Try selective deletion that preserves memories
+                self.vector_store.delete_documents_except_source("prmth_memory")
+            elif hasattr(self.vector_store, "delete_collection"):
+                # Fallback: clear everything
                 self.vector_store.delete_collection()
+
             if hasattr(self.change_detector, "reset"):
                 self.change_detector.reset()
-            logger.info("Cleared unified index")
+
+            msg = "Cleared unified index"
+            if preserve_memory:
+                msg += " (preserved prmth_memory)"
+            logger.info(msg)
         except Exception as e:
             logger.warning(f"Error clearing index: {e}")
 
@@ -490,7 +520,9 @@ class DocumentIndexer:
                 combined_filters.update(qdrant_filters)
 
             # Perform vector search on unified index
-            search_limit = max_results * 3 if parsed_query.metadata_filters else max_results
+            search_limit = (
+                max_results * 3 if parsed_query.metadata_filters else max_results
+            )
             results = self.vector_store.query(
                 query_vector=query_vector,
                 top_k=search_limit,
@@ -558,6 +590,173 @@ class DocumentIndexer:
             "total_sources": len(sources_list),
             "total_documents": 0,  # Placeholder - would need index stats to populate
         }
+
+    def add_memory_document(
+        self,
+        title: str,
+        content: str,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a memory document directly to the unified index (v0.4.0+).
+
+        Memory documents are stored under the prmth_memory source and bypass
+        file-based routing. Useful for session summaries, decisions, and patterns
+        that don't originate from the datalake.
+
+        Args:
+            title: Document title (used for search and deduplication)
+            content: Markdown body (Content, Decisions, Patterns, Lessons, etc.)
+            tags: Optional list of tags (e.g., ["kubernetes", "session-export"])
+            metadata: Optional dict with extra metadata (source_project, author, session_id, etc.)
+
+        Returns:
+            Dictionary with status, document_id, chunks_count, source_type, created timestamp
+
+        Raises:
+            IndexerError: If document addition fails
+        """
+        import hashlib
+        import time
+        from datetime import datetime
+
+        try:
+            if not self.vector_store:
+                raise IndexerError("Vector store not initialized")
+
+            if not title or not content:
+                raise IndexerError("title and content are required")
+
+            # Generate stable document ID from content hash (for deduplication)
+            content_hash = hashlib.sha256((title + content).encode()).hexdigest()[:16]
+            document_id = f"memory_{content_hash}"
+
+            # Prepare searchable text
+            tags_list = tags or []
+            searchable_text = f"{title} {' '.join(tags_list)} {content}".strip()
+
+            # Build base metadata
+            now = datetime.utcnow().isoformat()
+            base_metadata = {
+                "title": title,
+                "tags": tags_list,
+                "created": now,
+                "author": "prometh_cortex_memory",
+                "source_type": "prmth_memory",
+                "document_id": document_id,
+            }
+
+            # Merge with caller-provided metadata
+            if metadata:
+                base_metadata.update(metadata)
+
+            # Get memory source config (chunk size and overlap)
+            from prometh_cortex.config import MEMORY_SOURCE
+
+            chunk_size = MEMORY_SOURCE.chunk_size
+            chunk_overlap = MEMORY_SOURCE.chunk_overlap
+
+            # Split content into chunks with word-boundary logic
+            chunks = self._chunk_text(
+                searchable_text,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+
+            if not chunks:
+                raise IndexerError("No chunks generated from content")
+
+            # Build document objects for vector store
+            documents = []
+            for chunk_index, chunk_text in enumerate(chunks):
+                chunk_metadata = base_metadata.copy()
+                chunk_metadata.update(
+                    {
+                        "chunk_index": chunk_index,
+                        "total_chunks": len(chunks),
+                    }
+                )
+
+                # Generate embedding
+                try:
+                    vector = self.embed_model.get_text_embedding(chunk_text)
+                except Exception as e:
+                    raise IndexerError(
+                        f"Failed to generate embedding for chunk {chunk_index}: {e}"
+                    )
+
+                doc = {
+                    "id": f"{document_id}_{chunk_index}",
+                    "text": chunk_text,
+                    "vector": vector,
+                    "metadata": chunk_metadata,
+                }
+                documents.append(doc)
+
+            # Add to vector store (upsert by point ID is idempotent)
+            self.vector_store.add_documents(documents)
+
+            return {
+                "status": "success",
+                "document_id": document_id,
+                "chunks_count": len(chunks),
+                "source_type": "prmth_memory",
+                "created": now,
+            }
+
+        except IndexerError:
+            raise
+        except Exception as e:
+            raise IndexerError(f"Failed to add memory document: {e}")
+
+    def _chunk_text(
+        self,
+        text: str,
+        chunk_size: int = 512,
+        chunk_overlap: int = 50,
+    ) -> List[str]:
+        """
+        Split text into chunks with word-boundary logic.
+
+        Args:
+            text: Text to split
+            chunk_size: Maximum size of each chunk in characters
+            chunk_overlap: Overlap between chunks in characters
+
+        Returns:
+            List of chunk strings
+        """
+        if not text.strip():
+            return []
+
+        chunks = []
+        start = 0
+
+        while start < len(text):
+            end = start + chunk_size
+
+            # If not the last chunk, try to break at word boundary
+            if end < len(text):
+                # Look for space or punctuation to break at
+                break_point = max(
+                    text.rfind(" ", start, end),
+                    text.rfind(".", start, end),
+                    text.rfind("\n", start, end),
+                )
+
+                if break_point > start:
+                    end = break_point + 1
+
+            chunk_text = text[start:end].strip()
+
+            if chunk_text:  # Only add non-empty chunks
+                chunks.append(chunk_text)
+
+            # Move start position, accounting for overlap
+            start = end - chunk_overlap if end < len(text) else len(text)
+
+        return chunks
 
     def update_query_parser_fields(self) -> None:
         """Update query parser with auto-discovered metadata fields."""

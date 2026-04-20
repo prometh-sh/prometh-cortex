@@ -127,9 +127,9 @@ cp config.toml.sample config.toml
 # Edit config.toml with your specific paths and settings
 ```
 
-### Configuration Format (TOML) - v0.3.0
+### Configuration Format (TOML) - v0.5.0
 
-Prometh Cortex v0.3.0 uses a **unified collection with per-source chunking** architecture. A single FAISS/Qdrant index contains all documents, with each source defining its own chunk parameters.
+Prometh Cortex v0.5.0 builds on the unified collection architecture with **memory preservation during force rebuilds**. A single FAISS/Qdrant index contains all documents plus an auto-injected virtual `prmth_memory` source for session summaries and decisions.
 
 ```toml
 [datalake]
@@ -182,6 +182,16 @@ chunk_size = 512
 chunk_overlap = 50
 source_patterns = ["*"]  # Catch-all for unmatched documents
 
+# Virtual memory source (v0.5.0+)
+# Auto-injected; no file-based routing
+# Stores session summaries, decisions, patterns
+# Preserved during force rebuilds
+[[sources]]
+name = "prmth_memory"
+chunk_size = 512
+chunk_overlap = 50
+source_patterns = [".prmth_memory"]  # Virtual pattern (won't match real files)
+
 [vector_store]
 type = "faiss"  # or "qdrant"
 
@@ -192,12 +202,23 @@ port = 6333
 collection_name = "prometh_cortex"
 ```
 
-**Key Changes in v0.3.0**:
-- ✅ Single `[[collections]]` section (previously multiple)
-- ✅ Multiple `[[sources]]` sections with chunking parameters
-- ✅ Documents routed to sources by pattern matching
-- ✅ Single unified FAISS/Qdrant index (vs multiple per v0.2.0)
-- ✅ 40-63% faster queries (~300ms vs ~500ms)
+**Key Features in v0.5.0**:
+- ✅ Memory preservation during `pcortex build --force` and `pcortex rebuild`
+- ✅ Virtual `prmth_memory` source auto-injected into all configs
+- ✅ Session memories queryable immediately (no rebuild needed)
+- ✅ Deduped memories by content hash (idempotent)
+- ✅ Works with both FAISS (sidecar JSON) and Qdrant (filter-based deletion)
+
+**Key Changes from v0.4.0**:
+- ✅ Memory tool now preserves session data across force rebuilds
+- ✅ Better incremental indexing for memory-heavy workflows
+- ✅ Improved metadata tracking for memory documents
+
+**Key Changes from v0.3.0**:
+- ✅ SSE/HTTP Transport for daemon mode
+- ✅ OpenCode first-class support
+- ✅ Auto config generation for all clients
+- ✅ Memory tool for session persistence
 
 ## Vector Store Configuration
 
@@ -446,7 +467,7 @@ pcortex serve --host 0.0.0.0 --port 9000
 pcortex serve --reload
 ```
 
-## Server Types (v0.3.0+)
+## Server Types (v0.3.0+, Transports v0.4.0+, Memory v0.5.0+)
 
 ### MCP Protocol Server (`pcortex mcp start`)
 **For Claude Desktop, OpenCode, Claude Code, and other MCP clients**
@@ -454,12 +475,111 @@ pcortex serve --reload
 Provides MCP tools with configurable transport (v0.4.0+):
 - **stdio** (default): Subprocess per client session, suitable for Claude Desktop
 - **sse**: Persistent daemon with Server-Sent Events, shared across multiple clients
-- **streamable-http**: Newer MCP spec HTTP transport
+- **streamable-http**: Newer MCP spec HTTP transport (v0.5.0+)
 
 MCP Tools:
 - **prometh_cortex_query**: Search unified index with optional `source_type` filtering
 - **prometh_cortex_list_sources**: List all sources with statistics (v0.3.0+)
 - **prometh_cortex_health**: Get system health status and unified collection metrics
+- **prometh_cortex_memory**: Store session summaries, decisions, patterns directly to index (v0.5.0+)
+
+#### Memory Tool (v0.5.0+)
+
+Store and query session insights without rebuilding the entire index.
+
+**Purpose**: Capture high-value knowledge from agent sessions (OpenCode, Claude Desktop) and make it immediately searchable across your knowledge base.
+
+**Key Features**:
+- ✅ **Immediate Availability**: Documents queryable right after creation (no rebuild needed)
+- ✅ **Automatic Deduplication**: Same title + content = same document ID (idempotent)
+- ✅ **Memory Preservation**: Memories survive `pcortex build --force` and `pcortex rebuild`
+- ✅ **Metadata Rich**: Store tags, session IDs, project references, custom metadata
+- ✅ **Virtual Source**: Auto-injected `prmth_memory` source (no file-based routing)
+
+**Parameters**:
+```json
+{
+  "title": "string (required) — Document title for search",
+  "content": "string (required) — Markdown body (Content, Decisions, Patterns, etc.)",
+  "tags": ["array of strings (optional) — e.g., 'kubernetes', 'incident', 'session'"],
+  "metadata": {
+    "source_project": "string (optional) — Project or context",
+    "author": "string (optional) — Author/agent name",
+    "session_id": "string (optional) — Session identifier",
+    "custom_field": "any (optional) — Custom metadata"
+  }
+}
+```
+
+**Usage Example** (Claude Desktop / OpenCode):
+```
+User: "Save this session summary to memory"
+
+Agent Response:
+prometh_cortex_memory(
+  title="Session: Microservices Architecture Review - 2026-04-20",
+  content="""## Summary
+Reviewed and documented the microservices architecture decisions for the platform migration project.
+
+## Decisions Made
+- Use event-driven architecture for service communication
+- Implement circuit breaker pattern for resilience
+- Store session state in distributed cache (Redis/Memcached)
+
+## Lessons Learned
+- Service mesh complexity grows with cluster size
+- Proper monitoring critical before production deployment
+- Version compatibility matrix must be maintained
+
+## Next Steps
+- Document API contracts for all services
+- Set up distributed tracing infrastructure
+- Schedule follow-up architecture review in 2 weeks
+""",
+  tags=["session", "architecture", "microservices"],
+  metadata={
+    "session_id": "sess_arch_review_2026_04_20",
+    "project": "platform-migration",
+    "version": "v0.5.0"
+  }
+)
+```
+
+**Query Memory Documents**:
+```bash
+# Query across memory documents only
+pcortex query "circuit breaker pattern" --source prmth_memory
+
+# Query everywhere (memories + other sources)
+pcortex query "architecture decisions"
+
+# Via HTTP API
+curl -X POST http://localhost:8001/prometh_cortex_query \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "session decisions and lessons learned",
+    "source_type": "prmth_memory",
+    "max_results": 5
+  }'
+```
+
+**Force Rebuild with Memory Preservation**:
+```bash
+# Both commands now preserve memories (v0.5.0+)
+pcortex build --force
+pcortex rebuild --confirm
+
+# Verify memories still accessible after rebuild
+pcortex query "architecture decisions" --source prmth_memory
+```
+
+**Memory Workflow** (Typical Session):
+1. **During Session**: Capture decisions/patterns via `prometh_cortex_memory()` tool
+2. **Immediately Queryable**: Ask "What did we decide about X?" → searches memory
+3. **Force Rebuild**: Run `pcortex build --force` when source docs change
+4. **Memories Preserved**: Session insights survive the rebuild
+5. **Long-term KB**: Export memories to permanent documents when needed
 
 ### HTTP REST Server (`pcortex serve`)
 **For Perplexity, VSCode, web integrations**
@@ -1040,16 +1160,6 @@ Create `.vscode/tasks.json` for quick queries:
 - ✅ **Verify Paths**: Ensure all paths are absolute and accessible
 - ✅ **Test Manually**: Run `pcortex mcp` or `pcortex serve` to verify functionality
 - ✅ **Restart VSCode**: After configuration changes, restart VSCode completely
-  "inputs": [
-    {
-      "id": "searchQuery",
-      "description": "Enter your search query",
-      "default": "meeting notes",
-      "type": "promptString"
-    }
-  ]
-}
-```
 
 **Usage**: Press `Ctrl+Shift+P` → "Tasks: Run Task" → "Query Prometh-Cortex"
 
@@ -1071,13 +1181,27 @@ Create `.vscode/tasks.json` for quick queries:
    - **Port**: Configurable (default: 8080)
    - **Usage**: Traditional HTTP API access
 
+#### MCP Transport Selection Guide
+
+| Transport | Best For | Port | Startup | Shared State | Setup |
+|-----------|----------|------|---------|--------------|-------|
+| **stdio** | Single client (Claude Desktop) | None | ~2s | No | Simple: `pcortex mcp` |
+| **sse** | Multiple clients (OpenCode + Claude Desktop) | Yes | ~2s | Yes | Daemon: `pcortex mcp start -t sse` |
+| **streamable-http** | HTTP clients + MCP | Yes | ~2s | Yes | Daemon: `pcortex mcp start -t streamable-http` |
+
+**Decision Tree**:
+- **Just using Claude Desktop?** → Use `stdio` (default)
+- **Using OpenCode + Claude Desktop?** → Use `sse` daemon (shared startup cost)
+- **Remote access needed?** → Use `sse` with `--host 0.0.0.0` (Tailscale/SSH tunnel)
+- **Need HTTP API + MCP?** → Use `streamable-http` daemon
+
 **Configuration Prerequisites**: 
 
 1. **Environment Setup**:
-   ```bash
-   # Create and activate virtual environment
-   python -m venv .venv
-   source .venv/bin/activate  # macOS/Linux
+    ```bash
+    # Create and activate virtual environment
+    python -m venv .venv
+    source .venv/bin/activate  # macOS/Linux
    
    # Install in development mode
    pip install -e .
@@ -1197,7 +1321,7 @@ echo "Logs: /tmp/prometh-cortex-http.log"
 ### Setup Development Environment
 ```bash
 # Clone repository
-git clone https://github.com/ivannagy/prometh-cortex.git
+git clone https://github.com/prometh-sh/prometh-cortex.git
 cd prometh-cortex
 
 # Install with development dependencies
@@ -1307,12 +1431,20 @@ Found a security vulnerability? Please see [SECURITY.md](SECURITY.md) for respon
 ## Documentation
 
 **Architecture & Design**:
+- **[Memory Preservation Spec (v0.5.0)](docs/specs/feature-memory-preservation-force-rebuild-spec.md)** - Technical specification for preserving memories across force rebuilds
 - **[Unified Collection Spec (v0.3.0+)](docs/specs/feature-unified-collection-per-source-chunking-spec.md)** - Complete technical specification for unified collection with per-source chunking architecture
 - **[Multi-Collection Spec (v0.2.0 - Deprecated)](docs/specs/feature-rag-multi-collection-indexing-spec.md)** - Legacy multi-collection architecture (archived for reference)
 
 **Migration Guides**:
+- **[v0.4.0 → v0.5.0 Migration Guide](docs/migration-v0.4-to-v0.5.md)** - Memory preservation and improved indexing
 - **[v0.2.0 → v0.3.0 Migration Guide](docs/migration-v0.2-to-v0.3.md)** - Step-by-step guide for migrating from multi-collection to unified collection
 - **[v0.1.x → v0.2.0 Migration Guide](docs/migration-v0.1-to-v0.2.md)** - Historical migration guide (archived)
+
+**Key Improvements in v0.5.0**:
+- **Memory Preservation**: Session memories survive `pcortex build --force` and `pcortex rebuild`
+- **Memory Tool (MCP)**: `prometh_cortex_memory()` for capturing decisions, patterns, and session summaries
+- **Dual Backend Support**: FAISS (sidecar JSON) and Qdrant (filter-based) memory preservation
+- **Smart Metadata Retrieval**: Handle both parent document IDs and chunk IDs seamlessly
 
 **Key Improvements in v0.4.0**:
 - **SSE/HTTP Transport**: Run MCP as a persistent daemon shared across clients

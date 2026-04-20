@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-20
+
+### Added
+- **Memory Tool (MCP)**: New `prometh_cortex_memory()` tool for capturing and storing session summaries, decisions, and patterns directly to the index without rebuilding
+- **Memory Preservation on Force Rebuild**: Memories automatically survive `pcortex build --force` and `pcortex rebuild --confirm` via backend-specific strategies (FAISS sidecar JSON, Qdrant filter-based deletion)
+- **Virtual Memory Source**: Auto-injected `prmth_memory` source for in-memory document storage with per-source chunk configuration
+- **Automatic Deduplication**: Memory documents deduplicated by content hash (title + content = same document ID, idempotent)
+- **Metadata-Rich Storage**: Support for tags, session IDs, project references, and custom metadata in memory documents
+- **Immediate Queryability**: Memories available for search immediately after creation (no rebuild needed)
+- **Dual Vector Store Support**: Memory preservation works seamlessly with both FAISS (local) and Qdrant (cloud) backends
+- **Smart Metadata Retrieval**: Automatic handling of both parent document IDs and chunk IDs in memory documents
+
+### Changed
+- **Configuration Schema**: Added virtual `prmth_memory` source to default configuration (auto-injected)
+- **Vector Store Interface**: Enhanced with `delete_documents_except_source()` for selective metadata clearing
+- **Indexer API**: `add_memory_document()` method for direct memory storage with chunking and deduplication
+- **MCP Tools**: Added `prometh_cortex_memory()` to available tools alongside query and health checks
+- **pyproject.toml**: Updated version to 0.5.0 and GitHub URLs to prometh-sh organization
+
+### Improved
+- **Memory Workflow**: Session → Capture → Query → Force Rebuild → Preserved → Export workflow documented
+- **Transport Selection**: Added comprehensive decision table and decision tree for choosing between stdio/sse/streamable-http
+- **Documentation**: Complete v0.5.0 memory preservation specification and v0.4.0 → v0.5.0 migration guide
+
+### Fixed
+- Metadata persistence across index clear operations (both FAISS and Qdrant)
+- Chunk ID tracking for accurate metadata retrieval in memory documents
+- Virtual source pattern matching (`.prmth_memory` won't match real files)
+
+### Migration
+- See `docs/migration-v0.4-to-v0.5.md` for detailed upgrade instructions
+- Backward compatible: existing v0.4.0 configs auto-inject `prmth_memory` source
+- Memory tool optional: use only when needed for session capture workflows
+
 ## [0.4.0] - 2026-04-16
 
 ### Added
