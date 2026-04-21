@@ -4,60 +4,58 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prometh-cortex"
-version = "0.5.0"
+version = "0.5.1"
 description = "Multi-Datalake RAG Indexer with Unified Collection & Per-Source Chunking - MCP & HTTP Server"
-authors = [
-    {name = "Ivan Nagy", email = "prometh-cortex@prometh.sh"},
-]
+authors = [{ name = "Ivan Nagy", email = "prometh-cortex@prometh.sh" }]
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
-    # Core dependencies
-    "click>=8.0.0",
-    "toml>=0.10.0",
-    "pyyaml>=6.0.0",
-    "pydantic>=2.0.0",
-    # RAG and Vector Store
-    "llama-index>=0.10.0",
-    "llama-index-vector-stores-faiss>=0.1.0",
-    "llama-index-embeddings-huggingface>=0.1.0",
-    "faiss-cpu>=1.7.0",
-    "sentence-transformers>=2.2.0",
-    "qdrant-client>=1.7.0",
-    # MCP Server (HTTP)
-    "fastapi>=0.100.0",
-    "uvicorn[standard]>=0.23.0",
-    # MCP Server (stdio protocol)
-    "fastmcp>=0.9.0",
-    # File processing
-    "python-frontmatter>=1.0.0",
-    "markdown>=3.4.0",
-    # Utilities
-    "rich>=13.0.0",
-    "tqdm>=4.65.0",
+  # Core dependencies
+  "click>=8.0.0",
+  "toml>=0.10.0",
+  "pyyaml>=6.0.0",
+  "pydantic>=2.0.0",
+  # RAG and Vector Store
+  "llama-index>=0.10.0",
+  "llama-index-vector-stores-faiss>=0.1.0",
+  "llama-index-embeddings-huggingface>=0.1.0",
+  "faiss-cpu>=1.7.0",
+  "sentence-transformers>=2.2.0",
+  "qdrant-client>=1.7.0",
+  # MCP Server (HTTP)
+  "fastapi>=0.100.0",
+  "uvicorn[standard]>=0.23.0",
+  # MCP Server (stdio protocol)
+  "fastmcp>=0.9.0",
+  # File processing
+  "python-frontmatter>=1.0.0",
+  "markdown>=3.4.0",
+  # Utilities
+  "rich>=13.0.0",
+  "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.5.0",
-    "pre-commit>=3.0.0",
+  "pytest>=7.0.0",
+  "pytest-asyncio>=0.21.0",
+  "pytest-cov>=4.0.0",
+  "black>=23.0.0",
+  "isort>=5.12.0",
+  "flake8>=6.0.0",
+  "mypy>=1.5.0",
+  "pre-commit>=3.0.0",
 ]
 
 [project.scripts]
@@ -72,11 +70,7 @@ Issues = "https://github.com/prometh-sh/prometh-cortex/issues"
 packages = ["src/prometh_cortex"]
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/src",
-    "/tests",
-    "/docs",
-]
+include = ["/src", "/tests", "/docs"]
 
 # Black configuration
 [tool.black]
@@ -111,16 +105,16 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=src/prometh_cortex",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--strict-markers",
-    "--strict-config",
+  "--cov=src/prometh_cortex",
+  "--cov-report=term-missing",
+  "--cov-report=html",
+  "--strict-markers",
+  "--strict-config",
 ]
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests as integration tests",
+  "unit: marks tests as unit tests",
 ]
 
 # mypy configuration
@@ -141,33 +135,30 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "llama_index.*",
-    "faiss.*",
-    "sentence_transformers.*",
-    "frontmatter.*",
-    "qdrant_client.*",
+  "llama_index.*",
+  "faiss.*",
+  "sentence_transformers.*",
+  "frontmatter.*",
+  "qdrant_client.*",
 ]
 ignore_missing_imports = true
 
 # Coverage configuration
 [tool.coverage.run]
 source = ["src/prometh_cortex"]
-omit = [
-    "*/tests/*",
-    "*/test_*",
-    "*/__pycache__/*",
-]
+omit = ["*/tests/*", "*/test_*", "*/__pycache__/*"]
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
+  "pragma: no cover",
+  "def __repr__",
+  "if self.debug:",
+  "if settings.DEBUG",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if 0:",
+  "if __name__ == .__main__.:",
+  "class .*\\bProtocol\\):",
+  "@(abc\\.)?abstractmethod",
 ]
+

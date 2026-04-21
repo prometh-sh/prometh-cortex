@@ -358,8 +358,10 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             
             # Check last index update (placeholder - would need to store this)
             last_index_update = None
-            config_file = config.rag_index_dir / "config.json"
-            if config_file.exists():
+            config_file = (config.rag_index_dir / "config.json").resolve()
+            base_dir = config.rag_index_dir.resolve()
+            # Validate that config_file stays within base_dir (path traversal defense)
+            if config_file.is_relative_to(base_dir) and config_file.exists():
                 try:
                     with open(config_file) as f:
                         config_data = json.load(f)
