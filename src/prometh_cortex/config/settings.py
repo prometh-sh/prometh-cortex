@@ -140,7 +140,7 @@ class Config(BaseModel):
         description="Core fields always available for structured queries",
     )
     structured_query_extended_fields: List[str] = Field(
-        default=["status", "focus", "title", "subject", "organizer", "location"],
+        default=["project", "session_type", "status", "focus", "title", "subject", "organizer", "location"],
         description="Extended fields available for structured queries (user configurable)",
     )
     structured_query_auto_discovery: bool = Field(
