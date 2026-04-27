@@ -710,6 +710,82 @@ class DocumentIndexer:
         except Exception as e:
             raise IndexerError(f"Failed to add memory document: {e}")
 
+    def list_memories(
+        self,
+        since: Optional[float] = None,
+        project: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List memory documents with optional filtering.
+
+        Args:
+            since: Unix timestamp - only include docs created after this time
+            project: Filter by metadata.project value
+            tag: Filter by tag value
+
+        Returns:
+            List of memory documents sorted by creation date (newest first)
+        """
+        try:
+            return self.vector_store.list_memory_documents(
+                since=since, project=project, tag=tag
+            )
+        except Exception as e:
+            logger.error(f"Failed to list memory documents: {e}")
+            return []
+
+    def delete_memories(self, document_ids: List[str]) -> int:
+        """Delete specific memory documents by their document_ids.
+
+        Args:
+            document_ids: List of document_ids to delete
+
+        Returns:
+            Number of documents deleted
+        """
+        if not document_ids:
+            return 0
+
+        try:
+            deleted_count = self.vector_store.delete_memory_documents(document_ids)
+            logger.info(f"Deleted {deleted_count} memory documents")
+            return deleted_count
+        except Exception as e:
+            raise IndexerError(f"Failed to delete memory documents: {e}")
+
+    def clear_memories(
+        self,
+        expiry: Optional[float] = None,
+        project: Optional[str] = None,
+        doc_id: Optional[str] = None,
+        all_: bool = False,
+    ) -> int:
+        """Clear memory documents based on filters.
+
+        Args:
+            expiry: Unix timestamp - delete docs created before this time
+            project: Delete where metadata.project == value
+            doc_id: Delete specific memory by document_id
+            all_: Delete all memory documents
+
+        Returns:
+            Number of documents deleted
+        """
+        # Determine which documents to delete based on filters
+        if all_:
+            # Get all memories
+            memories = self.list_memories()
+            doc_ids = [m.get("document_id") for m in memories if m.get("document_id")]
+        elif doc_id:
+            # Delete specific document
+            doc_ids = [doc_id]
+        else:
+            # Filter by expiry and/or project
+            memories = self.list_memories(since=expiry, project=project)
+            doc_ids = [m.get("document_id") for m in memories if m.get("document_id")]
+
+        return self.delete_memories(doc_ids)
+
     def _chunk_text(
         self,
         text: str,

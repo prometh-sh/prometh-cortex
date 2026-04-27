@@ -595,7 +595,7 @@ async def prometh_cortex_memory(
 
     Example usage (from an agent):
         result = await prometh_cortex_memory(
-            title="Session: Kubernetes OOMKill Investigation",
+            title="Kubernetes OOMKill Investigation",
             content="## Context\\nInvestigated OOMKill on app-pod-123...\\n## Decisions\\n- Increase memory limit to 2Gi\\n- Add monitoring alert...",
             tags=["kubernetes", "incident", "memory"],
             metadata={

@@ -169,3 +169,36 @@ class VectorStoreInterface(ABC):
             backup_path: Path to backup metadata file
         """
         pass
+
+    @abstractmethod
+    def list_memory_documents(
+        self,
+        since: Optional[float] = None,
+        project: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List memory documents with optional filtering.
+
+        Returns one entry per unique document_id (deduplicated across chunks).
+
+        Args:
+            since: Unix timestamp - only include docs created after this time
+            project: Filter by metadata.project value
+            tag: Filter by tag value
+
+        Returns:
+            List of memory documents with metadata, deduplicated by document_id
+        """
+        pass
+
+    @abstractmethod
+    def delete_memory_documents(self, document_ids: List[str]) -> int:
+        """Delete specific memory documents by their document_ids.
+
+        Args:
+            document_ids: List of document_ids to delete
+
+        Returns:
+            Number of documents deleted
+        """
+        pass
