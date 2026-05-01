@@ -11,6 +11,9 @@ rag_index_dir = "/path/to/index/storage"
 # MCP and HTTP server configuration
 port = 8080
 host = "localhost"
+# auth_token supports plain string or env var reference:
+#   Plain:  auth_token = "your-secure-token-here"
+#   EnvVar: auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"
 auth_token = "your-secure-token-here"     # Required for SSE/HTTP transports. Generate with: openssl rand -hex 32
 transport = "stdio"                        # "stdio" (default), "sse", or "streamable-http"
 # When transport = "sse" or "streamable-http":
@@ -30,10 +33,16 @@ type = "faiss"
 
 # Qdrant configuration (when type = "qdrant")
 [vector_store.qdrant]
+# host and api_key support plain string or env var reference:
+#   Plain:  host = "localhost"
+#   EnvVar: host = "{env:QDRANT_HOST}"
+#
+#   Plain:  api_key = "your-qdrant-api-key"
+#   EnvVar: api_key = "{env:QDRANT_API_KEY}"
 host = "localhost"
 port = 6333
 collection_name = "prometh_cortex"
-# api_key = "your-qdrant-api-key"  # For Qdrant Cloud
+# api_key = "your-qdrant-api-key"  # For Qdrant Cloud, or use: api_key = "{env:QDRANT_API_KEY}"
 # use_https = true                  # For Qdrant Cloud
 
 # FAISS configuration (when type = "faiss")

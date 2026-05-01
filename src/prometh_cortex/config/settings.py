@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +14,30 @@ class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
     pass
+
+
+def _resolve_env_ref(value: str) -> str:
+    """Resolve {env:VAR_NAME} syntax in config string values. Full-match only.
+    
+    Args:
+        value: Config value string that may contain {env:VAR_NAME} syntax
+        
+    Returns:
+        Resolved environment variable value, or original string if no env syntax found
+        
+    Raises:
+        ConfigValidationError: If env var referenced but not set
+    """
+    match = re.fullmatch(r'\{env:([^}]+)\}', value)
+    if match:
+        var_name = match.group(1)
+        resolved = os.environ.get(var_name)
+        if resolved is None:
+            raise ConfigValidationError(
+                f"Config references env var '{var_name}' but it is not set"
+            )
+        return resolved
+    return value
 
 
 class SourceConfig(BaseModel):
@@ -772,7 +797,7 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
         if "host" in server:
             config_data["mcp_host"] = server["host"]
         if "auth_token" in server:
-            config_data["mcp_auth_token"] = server["auth_token"]
+            config_data["mcp_auth_token"] = _resolve_env_ref(server["auth_token"])
         if "transport" in server:
             transport_value = server["transport"]
             valid_transports = ("stdio", "sse", "streamable-http")
@@ -817,13 +842,13 @@ def _flatten_toml_config(toml_data: Dict[str, Any]) -> Dict[str, Any]:
         if "qdrant" in vector_store:
             qdrant = vector_store["qdrant"]
             if "host" in qdrant:
-                config_data["qdrant_host"] = qdrant["host"]
+                config_data["qdrant_host"] = _resolve_env_ref(qdrant["host"])
             if "port" in qdrant:
                 config_data["qdrant_port"] = qdrant["port"]
             if "collection_name" in qdrant:
                 config_data["qdrant_collection_name"] = qdrant["collection_name"]
             if "api_key" in qdrant:
-                config_data["qdrant_api_key"] = qdrant["api_key"]
+                config_data["qdrant_api_key"] = _resolve_env_ref(qdrant["api_key"])
             if "use_https" in qdrant:
                 config_data["qdrant_use_https"] = qdrant["use_https"]
 
