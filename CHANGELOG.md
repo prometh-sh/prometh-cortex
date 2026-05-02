@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-02
+
+### Added
+- **Memory Forget Command (v0.5.3)**: New `pcortex memory forget` CLI for selective deletion of memory documents with safety-first design
+- **Memory List Command**: `pcortex memory list` CLI with filtering by creation date, project, and tags
+- **Time Parser Utilities**: Support for relative (7d, 2w, 24h) and absolute (2026-03-01) time formats
+- **Dry-Run Safety Feature**: `--dry-run` flag on all memory delete operations to preview before deletion
+- **Project Payload Index**: Fixed Qdrant 400 Bad Request error by adding `project` keyword payload index
+- **Environment Variable Interpolation**: Config supports `{env:VAR}` syntax for sensitive fields (auth_token, api_key, host)
+  - Syntax: `auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"`
+  - Supported fields: `[server] auth_token`, `[vector_store.qdrant] host`, `[vector_store.qdrant] api_key`
+  - Fails loudly if env var not set (prevents silent misconfiguration)
+
+### Changed
+- **Memory Operations CLI**: Refactored memory management into dedicated `memory` command group with `list` and `forget` subcommands
+- **Test Safety**: All memory deletion tests refactored to use `--dry-run` for preview-only operations (no accidental deletions)
+- **Version Bump**: Updated to v0.5.3 in pyproject.toml
+
+### Fixed
+- **Qdrant Project Filter**: Added missing `"project": PayloadSchemaType.KEYWORD` payload index, resolving 400 Bad Request errors when filtering memories by project
+- **Expiry Filter Logic**: Corrected inverted expiry date filter to delete documents OLDER than specified date (not newer)
+- **Memory List Display**: Fixed title column truncation by adding `min_width=50` to allow text wrapping
+
+### Documentation
+- Added comprehensive `pcortex memory list` and `pcortex memory forget` command examples to README.md
+- Documented safety workflow: preview with `--dry-run`, review, then delete with `--confirm`
+- Added filter options documentation: `--since`, `--expiry`, `--project`, `--tag`, `--id`, `--all`
+- Enhanced `config.toml.sample` with detailed {env:VAR} interpolation examples for production deployments
+- Added Option 1/2/3 examples for auth_token, Qdrant host, and api_key configuration
+
+### Safety & Protection
+- ✅ Memory documents cannot be accidentally deleted without explicit `--dry-run` preview
+- ✅ Confirmation prompt required by default (disable with `--confirm` for automation)
+- ✅ Full ID display in memory list (no truncation) for accurate reference
+- ✅ Dry-run mode enforced in all unit tests to prevent data loss
+
 ## [0.5.0] - 2026-04-20
 
 ### Added

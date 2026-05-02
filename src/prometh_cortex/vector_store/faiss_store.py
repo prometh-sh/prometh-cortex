@@ -448,6 +448,167 @@ class FAISSVectorStore(VectorStoreInterface):
             self.config.rag_index_dir.iterdir()
         )
 
+    def list_memory_documents(
+        self,
+        since: Optional[float] = None,
+        project: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List memory documents with optional filtering.
+
+        Returns one entry per unique document_id (deduplicated across chunks).
+
+        Args:
+            since: Unix timestamp - only include docs created after this time
+            project: Filter by metadata.project value
+            tag: Filter by tag value
+
+        Returns:
+            List of memory documents with metadata, deduplicated by document_id
+        """
+        from logging import getLogger
+
+        logger = getLogger(__name__)
+
+        # Collect unique documents by document_id
+        docs_by_id: Dict[str, Dict[str, Any]] = {}
+
+        for doc_id, metadata in self._document_metadata.items():
+            # Filter by source_type
+            if metadata.get("source_type") != "prmth_memory":
+                continue
+
+            # Get the base document_id (remove chunk suffix if present)
+            base_doc_id = metadata.get("document_id", doc_id)
+
+            # Skip if already processed
+            if base_doc_id in docs_by_id:
+                continue
+
+            # Apply time filter
+            if since is not None:
+                created_str = metadata.get("created")
+                if created_str:
+                    try:
+                        # Parse ISO timestamp
+                        from datetime import datetime
+
+                        created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                        created_ts = created_dt.timestamp()
+                        if created_ts < since:
+                            continue
+                    except Exception:
+                        pass
+
+            # Apply project filter
+            if project is not None:
+                if metadata.get("metadata", {}).get("project") != project:
+                    continue
+
+            # Apply tag filter
+            if tag is not None:
+                doc_tags = metadata.get("tags", [])
+                if tag not in doc_tags:
+                    continue
+
+            # Add to results (deduplicated)
+            docs_by_id[base_doc_id] = metadata
+
+        # Convert to list and sort by created date (newest first)
+        result = list(docs_by_id.values())
+        try:
+            from datetime import datetime
+
+            result.sort(
+                key=lambda x: datetime.fromisoformat(
+                    x.get("created", "").replace("Z", "+00:00")
+                ),
+                reverse=True,
+            )
+        except Exception:
+            pass
+
+        return result
+
+    def delete_memory_documents(self, document_ids: List[str]) -> int:
+        """Delete specific memory documents by their document_ids.
+
+        For FAISS, this removes metadata entries and rebuilds the index
+        to exclude deleted documents.
+
+        Args:
+            document_ids: List of document_ids to delete
+
+        Returns:
+            Number of documents deleted
+        """
+        from logging import getLogger
+
+        logger = getLogger(__name__)
+
+        if not document_ids:
+            return 0
+
+        # Track which chunk IDs to delete
+        chunk_ids_to_delete = set()
+
+        # Find all chunk IDs that belong to the documents being deleted
+        for doc_id, metadata in list(self._document_metadata.items()):
+            if metadata.get("document_id") in document_ids:
+                chunk_ids_to_delete.add(doc_id)
+
+        if not chunk_ids_to_delete:
+            logger.info(f"No chunks found for document_ids: {document_ids}")
+            return 0
+
+        # Remove from metadata
+        for chunk_id in chunk_ids_to_delete:
+            self._document_metadata.pop(chunk_id, None)
+
+        # Save updated metadata
+        self._save_metadata()
+
+        # Rebuild index without deleted documents
+        # This is necessary because FAISS doesn't support selective deletion
+        if self.index is not None:
+            try:
+                # Save current metadata backup
+                remaining_docs = {
+                    doc_id: metadata
+                    for doc_id, metadata in self._document_metadata.items()
+                }
+
+                # Clear index
+                self.delete_collection()
+
+                # Rebuild with remaining documents
+                if remaining_docs:
+                    from llama_index.core import Document
+
+                    llama_docs = []
+                    for doc_id, metadata in remaining_docs.items():
+                        llama_doc = Document(
+                            text=metadata.get("text", ""),
+                            metadata=metadata,
+                            id_=doc_id,
+                        )
+                        llama_docs.append(llama_doc)
+
+                    if llama_docs:
+                        self.index = VectorStoreIndex.from_documents(
+                            llama_docs, embed_model=self.embed_model
+                        )
+                        self._save_metadata()
+
+                logger.info(
+                    f"Deleted {len(chunk_ids_to_delete)} chunks from {len(document_ids)} memory documents"
+                )
+            except Exception as e:
+                logger.error(f"Failed to rebuild index after deletion: {e}")
+                raise
+
+        return len(document_ids)
+
     def _matches_filters(
         self, metadata: Dict[str, Any], filters: Dict[str, Any]
     ) -> bool:

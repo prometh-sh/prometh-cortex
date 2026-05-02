@@ -552,6 +552,190 @@ class QdrantVectorStore(VectorStoreInterface):
                 "Backup collection name doesn't match current configuration"
             )
 
+    def list_memory_documents(
+        self,
+        since: Optional[float] = None,
+        project: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List memory documents with optional filtering.
+
+        Returns one entry per unique document_id (deduplicated across chunks).
+
+        Args:
+            since: Unix timestamp - only include docs created after this time
+            project: Filter by metadata.project value
+            tag: Filter by tag value
+
+        Returns:
+            List of memory documents with metadata, deduplicated by document_id
+        """
+        if not self._initialized:
+            self.initialize()
+
+        try:
+            docs_by_id: Dict[str, Dict[str, Any]] = {}
+            limit = 100
+            offset = None
+
+            # Build Qdrant filter for prmth_memory source
+            must_conditions = [
+                FieldCondition(key="source_type", match=MatchValue(value="prmth_memory"))
+            ]
+
+            # Add optional conditions
+            if project is not None:
+                must_conditions.append(
+                    FieldCondition(key="project", match=MatchValue(value=project))
+                )
+
+            if tag is not None:
+                must_conditions.append(
+                    FieldCondition(key="tags", match=MatchValue(value=tag))
+                )
+
+            scroll_filter = Filter(must=must_conditions)
+
+            # Scroll with filter
+            # new_offset=None means last page (all results fit or end reached)
+            while True:
+                points, new_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=limit,
+                    scroll_filter=scroll_filter,
+                    offset=offset,
+                )
+
+                if not points:
+                    break
+
+                for point in points:
+                    payload = point.payload
+                    doc_id = payload.get("document_id", str(point.id))
+
+                    # Apply time filter
+                    if since is not None:
+                        created_str = payload.get("created")
+                        if created_str:
+                            try:
+                                from datetime import datetime
+
+                                created_dt = datetime.fromisoformat(
+                                    created_str.replace("Z", "+00:00")
+                                )
+                                created_ts = created_dt.timestamp()
+                                if created_ts < since:
+                                    continue
+                            except Exception:
+                                pass
+
+                    # Deduplicate by document_id
+                    if doc_id not in docs_by_id:
+                        docs_by_id[doc_id] = payload
+
+                offset = new_offset
+                if new_offset is None:
+                    break
+
+            # Convert to list and sort by created date (newest first)
+            result = list(docs_by_id.values())
+            try:
+                from datetime import datetime
+
+                result.sort(
+                    key=lambda x: datetime.fromisoformat(
+                        x.get("created", "").replace("Z", "+00:00")
+                    ),
+                    reverse=True,
+                )
+            except Exception:
+                pass
+
+            return result
+
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to list memory documents from Qdrant: {e}")
+            return []
+
+    def delete_memory_documents(self, document_ids: List[str]) -> int:
+        """Delete specific memory documents by their document_ids.
+
+        For Qdrant, this scrolls to find points with matching document_ids,
+        then deletes by point ID (which doesn't require an index).
+
+        Args:
+            document_ids: List of document_ids to delete
+
+        Returns:
+            Number of documents deleted
+        """
+        if not self._initialized:
+            self.initialize()
+
+        if not document_ids:
+            return 0
+
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Convert to set for faster lookup
+            ids_to_delete = set(document_ids)
+            points_to_delete = []
+
+            # Scroll through all documents and find matching point IDs
+            offset = None
+
+            while True:
+                points, new_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=100,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="source_type",
+                                match=MatchValue(value="prmth_memory"),
+                            )
+                        ]
+                    ),
+                    offset=offset,
+                )
+
+                if not points:
+                    break
+
+                # Collect point IDs for matching documents
+                for point in points:
+                    if point.payload.get("document_id") in ids_to_delete:
+                        points_to_delete.append(point.id)
+
+                offset = new_offset
+                if new_offset is None:
+                    break
+
+            if not points_to_delete:
+                logger.info(f"No memory documents found matching IDs: {document_ids}")
+                return 0
+
+            # Delete by point IDs
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=points_to_delete,
+            )
+
+            logger.info(
+                f"Deleted {len(points_to_delete)} chunks from {len(document_ids)} memory documents"
+            )
+            return len(document_ids)
+
+        except Exception as e:
+            logger.error(f"Failed to delete memory documents from Qdrant: {e}")
+            raise
+
     def _ensure_collection_exists(self) -> None:
         """Ensure the collection exists in Qdrant."""
         try:
@@ -584,6 +768,7 @@ class QdrantVectorStore(VectorStoreInterface):
             "file_path": PayloadSchemaType.KEYWORD,
             "file_name": PayloadSchemaType.KEYWORD,
             "tags": PayloadSchemaType.KEYWORD,
+            "project": PayloadSchemaType.KEYWORD,
         }
         for field_name, field_type in index_fields.items():
             try:
