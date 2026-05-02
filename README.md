@@ -425,6 +425,73 @@ pcortex sources
 pcortex sources -v
 ```
 
+### Manage Memory Documents (v0.5.3+)
+
+#### List Memory Documents
+```bash
+# List all memories
+pcortex memory list
+
+# Filter by creation date (relative: 7d, 2w, 24h)
+pcortex memory list --since 7d
+
+# Filter by creation date (absolute: YYYY-MM-DD)
+pcortex memory list --since 2026-03-01
+
+# Filter by project
+pcortex memory list --project myproject
+
+# Filter by tag
+pcortex memory list --tag session
+
+# Combined filters
+pcortex memory list --since 7d --project myproject --tag session
+```
+
+#### Forget (Delete) Memory Documents
+**⚠️ Always preview with `--dry-run` before deleting memories!**
+
+```bash
+# Preview deletion of all memories (dry-run, no deletion)
+pcortex memory forget --all --dry-run
+
+# Delete all memories (requires confirmation)
+pcortex memory forget --all --confirm
+
+# Delete memories older than N days/date (dry-run preview)
+pcortex memory forget --expiry 30d --dry-run
+
+# Delete memories older than 30 days (actual deletion)
+pcortex memory forget --expiry 30d --confirm
+
+# Delete memories older than specific date (dry-run)
+pcortex memory forget --expiry 2026-03-01 --dry-run
+
+# Delete memories by project (dry-run)
+pcortex memory forget --project archive --dry-run
+
+# Delete specific memory by ID (dry-run)
+pcortex memory forget --id memory_abc123 --dry-run
+
+# Delete with combined filters (dry-run)
+pcortex memory forget --expiry 7d --project archive --dry-run
+
+# Delete without prompting (skip confirmation)
+pcortex memory forget --all --confirm
+```
+
+**Safety Features**:
+- ✅ **`--dry-run` (default behavior for preview)**: Shows what would be deleted without making changes
+- ✅ **`--confirm`**: Skip confirmation prompt for automated workflows
+- ✅ **Confirmation prompt**: Required unless `--confirm` is used (can't accidentally delete)
+- ✅ **Expiry logic**: `--expiry 7d` deletes docs OLDER than 7 days (not newer)
+
+**Workflow for Safe Deletion**:
+1. **Always preview first**: `pcortex memory forget --expiry 30d --dry-run`
+2. **Review the preview**: See which memories will be deleted
+3. **Delete with confirmation**: `pcortex memory forget --expiry 30d` (will prompt)
+4. **Or skip prompt**: `pcortex memory forget --expiry 30d --confirm`
+
 ### Start Servers
 
 #### MCP Server (for Claude Desktop, OpenCode, Claude Code)
