@@ -1,7 +1,32 @@
-# Prometh Cortex Configuration Sample (v0.4.0)
+# Prometh Cortex Configuration Sample (v0.5.3)
 # Copy this file to ~/.config/prometh-cortex/config.toml and customize for your environment
 #   pcortex config --init    # Creates the config directory
 #   pcortex config --sample  # Generates this sample
+#
+# SENSITIVE FIELDS & ENVIRONMENT VARIABLE INTERPOLATION
+# ======================================================
+# Sensitive fields (auth_token, api_key, passwords) support environment variable
+# interpolation to avoid hardcoding secrets in config files:
+#
+#   Syntax: field_name = "{env:ENVIRONMENT_VARIABLE_NAME}"
+#   Example: api_key = "{env:QDRANT_API_KEY}"
+#
+# When a field uses {env:VAR}, the config loader:
+#   1. Reads the environment variable VAR
+#   2. Replaces {env:VAR} with the actual value
+#   3. Fails loudly if VAR is not set (prevents silent misconfiguration)
+#
+# Supported interpolated fields:
+#   - [server] auth_token
+#   - [vector_store.qdrant] host
+#   - [vector_store.qdrant] api_key
+#
+# Example setup:
+#   export PROMETH_CORTEX_MCP_AUTH="sk-abc123..."
+#   export QDRANT_API_KEY="your-qdrant-key-here"
+#   # config.toml contains:
+#   # auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"
+#   # api_key = "{env:QDRANT_API_KEY}"
 
 [storage]
 # Directory where RAG index will be stored (used by FAISS backend)
@@ -11,11 +36,20 @@ rag_index_dir = "/path/to/index/storage"
 # MCP and HTTP server configuration
 port = 8080
 host = "localhost"
-# auth_token supports plain string or env var reference:
-#   Plain:  auth_token = "your-secure-token-here"
-#   EnvVar: auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"
-auth_token = "your-secure-token-here"     # Required for SSE/HTTP transports. Generate with: openssl rand -hex 32
-transport = "stdio"                        # "stdio" (default), "sse", or "streamable-http"
+# AUTHENTICATION TOKEN (v0.5.3+ supports {env:VAR} interpolation)
+# Required for SSE/HTTP transports. Generate with: openssl rand -hex 32
+#
+# Option 1 (insecure): Hardcode the token (NOT recommended for production)
+#   auth_token = "your-secure-token-here"
+#
+# Option 2 (recommended): Use environment variable interpolation
+#   auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"
+#   Then set: export PROMETH_CORTEX_MCP_AUTH="your-token-here"
+#
+# IMPORTANT: When using {env:...}, the environment variable MUST be set
+# or config loading will fail with clear error message.
+auth_token = "{env:PROMETH_CORTEX_MCP_AUTH}"    # Environment variable reference (v0.5.3+)
+transport = "stdio"                             # "stdio" (default), "sse", or "streamable-http"
 # When transport = "sse" or "streamable-http":
 #   - The server listens on host:port as a persistent daemon
 #   - auth_token is REQUIRED and enforced on all connections
@@ -33,17 +67,33 @@ type = "faiss"
 
 # Qdrant configuration (when type = "qdrant")
 [vector_store.qdrant]
-# host and api_key support plain string or env var reference:
-#   Plain:  host = "localhost"
-#   EnvVar: host = "{env:QDRANT_HOST}"
+# HOST & API_KEY CONFIGURATION (v0.5.3+ supports {env:VAR} interpolation)
+# 
+# Option 1: Local Qdrant (no authentication needed)
+#   host = "localhost"
+#   port = 6333
+#   # api_key is optional for local instances
 #
-#   Plain:  api_key = "your-qdrant-api-key"
-#   EnvVar: api_key = "{env:QDRANT_API_KEY}"
-host = "localhost"
+# Option 2: Qdrant Cloud (requires api_key)
+#   host = "your-qdrant-cloud-host.cloud.qdrant.io"
+#   port = 6333
+#   use_https = true
+#   api_key = "your-qdrant-api-key"
+#
+# Option 3: Qdrant Cloud with environment variable (recommended for production)
+#   host = "{env:QDRANT_HOST}"
+#   port = 6333
+#   use_https = true
+#   api_key = "{env:QDRANT_API_KEY}"
+#   Then set: export QDRANT_HOST="..." and export QDRANT_API_KEY="..."
+#
+# IMPORTANT: When using {env:...}, the environment variable MUST be set
+# or config loading will fail with clear error message.
+host = "{env:QDRANT_HOST}"
 port = 6333
 collection_name = "prometh_cortex"
-# api_key = "your-qdrant-api-key"  # For Qdrant Cloud, or use: api_key = "{env:QDRANT_API_KEY}"
-# use_https = true                  # For Qdrant Cloud
+api_key = "{env:QDRANT_API_KEY}"    # Environment variable reference (v0.5.3+)
+use_https = false                   # Set to true for Qdrant Cloud
 
 # FAISS configuration (when type = "faiss")
 [vector_store.faiss]
