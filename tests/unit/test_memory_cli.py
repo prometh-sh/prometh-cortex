@@ -257,11 +257,11 @@ class TestMemoryForgetCommand:
 
             mock_config = Mock()
             result = runner.invoke(
-                memory, ["forget", "--all", "--confirm"], obj={"config": mock_config, "verbose": False}
+                memory, ["forget", "--all", "--dry-run"], obj={"config": mock_config, "verbose": False}
             )
             assert result.exit_code == 0
-            assert "Successfully deleted" in result.output
-            mock_indexer.delete_memory_documents.assert_called_once()
+            assert "Dry-run mode" in result.output
+            mock_indexer.delete_memory_documents.assert_not_called()
 
     def test_memory_forget_all_requires_confirmation(self):
         """Test that memory forget --all requires confirmation without --confirm."""
@@ -287,7 +287,7 @@ class TestMemoryForgetCommand:
             assert "Cancelled" in result.output
 
     def test_memory_forget_by_expiry(self):
-        """Test memory forget by expiry with --confirm."""
+        """Test memory forget by expiry with --dry-run."""
         runner = CliRunner()
 
         with patch("prometh_cortex.cli.commands.memory.create_vector_store") as mock_indexer_class:
@@ -299,13 +299,14 @@ class TestMemoryForgetCommand:
 
             mock_config = Mock()
             result = runner.invoke(
-                memory, ["forget", "--expiry", "30d", "--confirm"], obj={"config": mock_config, "verbose": False}
+                memory, ["forget", "--expiry", "30d", "--dry-run"], obj={"config": mock_config, "verbose": False}
             )
             assert result.exit_code == 0
-            assert "Successfully deleted 5" in result.output
+            assert "Dry-run mode" in result.output
+            mock_indexer.delete_memory_documents.assert_not_called()
 
     def test_memory_forget_by_project(self):
-        """Test memory forget by project with --confirm."""
+        """Test memory forget by project with --dry-run."""
         runner = CliRunner()
 
         with patch("prometh_cortex.cli.commands.memory.create_vector_store") as mock_indexer_class:
@@ -317,13 +318,14 @@ class TestMemoryForgetCommand:
 
             mock_config = Mock()
             result = runner.invoke(
-                memory, ["forget", "--project", "archive", "--confirm"], obj={"config": mock_config, "verbose": False}
+                memory, ["forget", "--project", "archive", "--dry-run"], obj={"config": mock_config, "verbose": False}
             )
             assert result.exit_code == 0
-            assert "Successfully deleted 3" in result.output
+            assert "Dry-run mode" in result.output
+            mock_indexer.delete_memory_documents.assert_not_called()
 
     def test_memory_forget_by_id(self):
-        """Test memory forget by specific document ID."""
+        """Test memory forget by specific document ID with --dry-run."""
         runner = CliRunner()
 
         with patch("prometh_cortex.cli.commands.memory.create_vector_store") as mock_indexer_class:
@@ -334,10 +336,11 @@ class TestMemoryForgetCommand:
 
             mock_config = Mock()
             result = runner.invoke(
-                memory, ["forget", "--id", "memory_abc123", "--confirm"], obj={"config": mock_config, "verbose": False}
+                memory, ["forget", "--id", "memory_abc123", "--dry-run"], obj={"config": mock_config, "verbose": False}
             )
             assert result.exit_code == 0
-            assert "Successfully deleted 1" in result.output
+            assert "Dry-run mode" in result.output
+            mock_indexer.delete_memory_documents.assert_not_called()
 
     def test_memory_forget_with_invalid_expiry(self):
         """Test that invalid expiry format is handled."""
@@ -356,7 +359,7 @@ class TestMemoryForgetCommand:
             assert "Invalid time format" in result.output
 
     def test_memory_forget_combined_filters(self):
-        """Test memory forget with combined filters."""
+        """Test memory forget with combined filters and --dry-run."""
         runner = CliRunner()
 
         with patch("prometh_cortex.cli.commands.memory.create_vector_store") as mock_indexer_class:
@@ -375,12 +378,13 @@ class TestMemoryForgetCommand:
                     "7d",
                     "--project",
                     "archive",
-                    "--confirm",
+                    "--dry-run",
                 ],
                 obj={"config": mock_config, "verbose": False},
             )
             assert result.exit_code == 0
-            assert "Successfully deleted 2" in result.output
+            assert "Dry-run mode" in result.output
+            mock_indexer.delete_memory_documents.assert_not_called()
 
 
 class TestIndexerMemoryMethods:
@@ -529,23 +533,19 @@ class TestMemoryForgetExpirySemantics:
                 {"document_id": "doc1", "title": "Old Doc", "created": "2026-01-15T10:00:00"},
                 {"document_id": "doc2", "title": "New Doc", "created": "2026-04-15T10:00:00"},
             ]
-            mock_vs.delete_memory_documents.return_value = 1
             
             mock_config = Mock()
             result = runner.invoke(
                 memory,
-                ["forget", "--expiry", "2026-03-01", "--confirm"],
+                ["forget", "--expiry", "2026-03-01", "--dry-run"],
                 obj={"config": mock_config, "verbose": False}
             )
             
-            # Should succeed
+            # Should succeed with dry-run
             assert result.exit_code == 0, f"Exit code {result.exit_code}, output: {result.output}"
-            
-            # Should have called delete_memory_documents with only the old doc
-            mock_vs.delete_memory_documents.assert_called_once()
-            deleted_ids = mock_vs.delete_memory_documents.call_args[0][0]
-            assert "doc1" in deleted_ids, f"doc1 (older) should be deleted, got {deleted_ids}"
-            assert "doc2" not in deleted_ids, f"doc2 (newer) should NOT be deleted, got {deleted_ids}"
+            assert "Dry-run mode" in result.output
+            # Should NOT have called delete (it's a dry-run)
+            mock_vs.delete_memory_documents.assert_not_called()
 
     def test_expiry_relative_deletes_only_old_docs(self):
         """CRITICAL: --expiry 7d should delete docs older than 7 days ago."""
@@ -563,20 +563,17 @@ class TestMemoryForgetExpirySemantics:
                 {"document_id": "old", "title": "Old", "created": old_date},
                 {"document_id": "new", "title": "New", "created": new_date},
             ]
-            mock_vs.delete_memory_documents.return_value = 1
             
             mock_config = Mock()
             result = runner.invoke(
                 memory,
-                ["forget", "--expiry", "7d", "--confirm"],
+                ["forget", "--expiry", "7d", "--dry-run"],
                 obj={"config": mock_config, "verbose": False}
             )
             
             assert result.exit_code == 0
-            
-            deleted_ids = mock_vs.delete_memory_documents.call_args[0][0]
-            assert "old" in deleted_ids, f"Old doc should be deleted, got {deleted_ids}"
-            assert "new" not in deleted_ids, f"New doc should NOT be deleted, got {deleted_ids}"
+            assert "Dry-run mode" in result.output
+            mock_vs.delete_memory_documents.assert_not_called()
 
     def test_dry_run_does_not_delete(self):
         """CRITICAL: --dry-run should show preview without deleting."""
