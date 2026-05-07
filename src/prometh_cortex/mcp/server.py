@@ -666,7 +666,7 @@ async def prometh_cortex_memory_dream_prepare(project: str) -> Dict[str, Any]:
             project=project, dreaming=False
         )
         episodic_memories = [
-            m for m in episodic_memories if m.get("memory_type") == "episodic"
+            m for m in episodic_memories if m.get("memory_type", "episodic") == "episodic"
         ]
 
         # Fetch prior semantic memories (to include as context, will be superseded)
