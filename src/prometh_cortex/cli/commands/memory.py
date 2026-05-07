@@ -146,28 +146,24 @@ def memory_list(ctx: click.Context, since: str, project: str, tag: str, filter_d
             # Build Detail column with memory consolidation info
             detail_lines = []
             
-            # Line 1: type and dreaming status
+            # Line 1: type with optional dreaming emoji and version
             memory_type = memory.get("memory_type", "episodic")
             dreaming = memory.get("dreaming", False)
-            dreaming_str = "✓" if dreaming else "-"
-            detail_lines.append(f"type={memory_type}  dream={dreaming_str}")
-            
-            # Line 2: consolidation version and ID (if present)
             cons_version = memory.get("consolidation_version")
+            
+            line1 = memory_type
+            if cons_version is not None:
+                line1 += f"  v{cons_version}"
+            if dreaming:
+                line1 += "  💤"
+            detail_lines.append(line1)
+            
+            # Line 2: consolidation ID (if present)
             cons_id = memory.get("consolidation_id")
-            if cons_version is not None or cons_id:
-                line2 = ""
-                if cons_version is not None:
-                    line2 += f"v{cons_version}"
-                if cons_id:
-                    # Show last 8 chars of ID
-                    cons_id_short = cons_id[-8:] if len(cons_id) > 8 else cons_id
-                    if line2:
-                        line2 += f"  cons={cons_id_short}"
-                    else:
-                        line2 = f"cons={cons_id_short}"
-                if line2:
-                    detail_lines.append(line2)
+            if cons_id:
+                # Show last 8 chars of ID
+                cons_id_short = cons_id[-8:] if len(cons_id) > 8 else cons_id
+                detail_lines.append(f"cons={cons_id_short}")
             
             # Line 3: source memories (if any)
             source_mems = memory.get("source_memories", [])

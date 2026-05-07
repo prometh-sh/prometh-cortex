@@ -833,8 +833,8 @@ class QdrantVectorStore(VectorStoreInterface):
             # Update payload on all chunks
             self.client.set_payload(
                 collection_name=self.collection_name,
-                points_selector=points_to_update,
                 payload=payload_updates,
+                points=points_to_update,
             )
 
             logger.info(
@@ -874,6 +874,7 @@ class QdrantVectorStore(VectorStoreInterface):
     def _ensure_payload_indexes(self) -> None:
         """Create payload indexes for fields used in filtering."""
         index_fields = {
+            "document_id": PayloadSchemaType.KEYWORD,
             "source_type": PayloadSchemaType.KEYWORD,
             "file_path": PayloadSchemaType.KEYWORD,
             "file_name": PayloadSchemaType.KEYWORD,
