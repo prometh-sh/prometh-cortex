@@ -624,9 +624,18 @@ class TestMemoryForgetExpirySemantics:
             mock_vs.delete_memory_documents.assert_not_called()
 
 
+def _create_mock_config():
+    """Create a mock config with required attributes for DocumentIndexer."""
+    mock_config = Mock()
+    mock_config.structured_query_core_fields = []
+    mock_config.structured_query_extended_fields = []
+    return mock_config
+
+
+
 class TestMemoryDreamCommand:
     """Tests for memory dream command (consolidation workflow)."""
-
+    
     def test_memory_dream_requires_project(self):
         """Test that memory dream requires --project flag."""
         runner = CliRunner()
@@ -643,8 +652,8 @@ class TestMemoryDreamCommand:
         mock_indexer.initialize.return_value = None
         mock_indexer.list_memories.return_value = []
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
-            mock_config = Mock()
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer):
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
             )
@@ -676,8 +685,8 @@ class TestMemoryDreamCommand:
         mock_indexer.initialize.return_value = None
         mock_indexer.list_memories.return_value = episodic_memories
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
-            mock_config = Mock()
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer):
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
             )
@@ -712,8 +721,8 @@ class TestMemoryDreamCommand:
         mock_indexer.initialize.return_value = None
         mock_indexer.list_memories.return_value = all_memories
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
-            mock_config = Mock()
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer):
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
             )
@@ -733,9 +742,9 @@ class TestMemoryDreamCommand:
         mock_indexer = MagicMock()
         mock_indexer.initialize.return_value = None
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer), \
              patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
-            mock_config = Mock()
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory,
                 ["dream", "--project", "myproject", "--revert", "nonexistent_id"],
@@ -766,9 +775,9 @@ class TestMemoryDreamCommand:
         mock_indexer.update_memory_metadata.return_value = None
         mock_indexer.delete_memories.return_value = None
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer), \
              patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
-            mock_config = Mock()
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory,
                 ["dream", "--project", "myproject", "--revert", "memory_cons1"],
@@ -804,9 +813,9 @@ class TestMemoryDreamCommand:
         mock_indexer.update_memory_metadata.return_value = None
         mock_indexer.delete_memories.return_value = None
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer), \
              patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
-            mock_config = Mock()
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory,
                 ["dream", "--project", "myproject", "--revert", "memory_cons1", "--keep-consolidated", "--confirm"],
@@ -836,9 +845,9 @@ class TestMemoryDreamCommand:
         mock_indexer = MagicMock()
         mock_indexer.initialize.return_value = None
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer), \
              patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
-            mock_config = Mock()
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory,
                 ["dream", "--project", "myproject", "--revert", "memory_cons1"],
@@ -869,9 +878,9 @@ class TestMemoryDreamCommand:
         mock_indexer.update_memory_metadata.return_value = None
         mock_indexer.delete_memories.return_value = None
 
-        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+        with patch("prometh_cortex.cli.commands.memory.DocumentIndexer", return_value=mock_indexer), \
              patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
-            mock_config = Mock()
+            mock_config = _create_mock_config()
             result = runner.invoke(
                 memory,
                 ["dream", "--project", "myproject", "--revert", "memory_cons1", "--confirm"],
