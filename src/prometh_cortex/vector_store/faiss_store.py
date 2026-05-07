@@ -198,8 +198,20 @@ class FAISSVectorStore(VectorStoreInterface):
 
             results = []
             for node in nodes:
+                # Build effective filters with default dreaming filter
+                effective_filters = dict(filters) if filters else {}
+                
+                # dreaming=None is a special signal to include all dreaming states
+                include_dreaming = effective_filters.get("dreaming") is None
+                if "dreaming" in effective_filters and effective_filters["dreaming"] is None:
+                    del effective_filters["dreaming"]  # Remove the signal
+                
+                # Default dreaming filter: exclude dreaming=true unless explicitly requested
+                if not include_dreaming and "dreaming" not in effective_filters:
+                    effective_filters["dreaming"] = False
+                
                 # Apply metadata filters if specified
-                if filters and not self._matches_filters(node.node.metadata, filters):
+                if not self._matches_filters(node.node.metadata, effective_filters):
                     continue
 
                 result = {
@@ -234,8 +246,20 @@ class FAISSVectorStore(VectorStoreInterface):
 
             results = []
             for node in nodes:
+                # Build effective filters with default dreaming filter
+                effective_filters = dict(filters) if filters else {}
+                
+                # dreaming=None is a special signal to include all dreaming states
+                include_dreaming = effective_filters.get("dreaming") is None
+                if "dreaming" in effective_filters and effective_filters["dreaming"] is None:
+                    del effective_filters["dreaming"]  # Remove the signal
+                
+                # Default dreaming filter: exclude dreaming=true unless explicitly requested
+                if not include_dreaming and "dreaming" not in effective_filters:
+                    effective_filters["dreaming"] = False
+                
                 # Apply metadata filters if specified
-                if filters and not self._matches_filters(node.node.metadata, filters):
+                if not self._matches_filters(node.node.metadata, effective_filters):
                     continue
 
                 result = {
@@ -453,6 +477,7 @@ class FAISSVectorStore(VectorStoreInterface):
         since: Optional[float] = None,
         project: Optional[str] = None,
         tag: Optional[str] = None,
+        dreaming: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """List memory documents with optional filtering.
 
@@ -462,6 +487,7 @@ class FAISSVectorStore(VectorStoreInterface):
             since: Unix timestamp - only include docs created after this time
             project: Filter by metadata.project value
             tag: Filter by tag value
+            dreaming: Filter by dreaming status (True=consolidated, False=active, None=all)
 
         Returns:
             List of memory documents with metadata, deduplicated by document_id
@@ -509,6 +535,11 @@ class FAISSVectorStore(VectorStoreInterface):
             if tag is not None:
                 doc_tags = metadata.get("tags", [])
                 if tag not in doc_tags:
+                    continue
+
+            # Apply dreaming filter
+            if dreaming is not None:
+                if metadata.get("dreaming") != dreaming:
                     continue
 
             # Add to results (deduplicated)
@@ -608,6 +639,46 @@ class FAISSVectorStore(VectorStoreInterface):
                 raise
 
         return len(document_ids)
+
+    def update_memory_metadata(
+        self, document_id: str, payload_updates: Dict[str, Any]
+    ) -> int:
+        """Update metadata fields on a memory document without re-embedding.
+
+        Finds all chunks of the memory and updates specified metadata fields.
+        Only updates fields present in payload_updates; others unchanged.
+
+        Args:
+            document_id: The memory document_id to update
+            payload_updates: Dict of fields to update (e.g., {"dreaming": True, "memory_type": "semantic"})
+
+        Returns:
+            Number of chunks updated
+        """
+        from logging import getLogger
+
+        logger = getLogger(__name__)
+
+        # Find all chunks for this document_id
+        chunks_updated = 0
+
+        for chunk_id, metadata in self._document_metadata.items():
+            if metadata.get("document_id") == document_id:
+                # Update fields in metadata
+                metadata.update(payload_updates)
+                chunks_updated += 1
+
+        if chunks_updated == 0:
+            logger.warning(f"No chunks found for document_id: {document_id}")
+            return 0
+
+        # Save updated metadata to disk
+        self._save_metadata()
+
+        logger.info(
+            f"Updated {chunks_updated} chunks for document_id {document_id}: {payload_updates}"
+        )
+        return chunks_updated
 
     def _matches_filters(
         self, metadata: Dict[str, Any], filters: Dict[str, Any]

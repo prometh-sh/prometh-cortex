@@ -334,31 +334,49 @@ class QdrantVectorStore(VectorStoreInterface):
 
         try:
             # Build filter conditions
-            filter_conditions = None
+            must_conditions = []
+            must_not_conditions = []
+            include_dreaming = False  # Track if user explicitly included dreaming filter
+            
             if filters:
-                conditions = []
                 for key, value in filters.items():
+                    # dreaming=None is a special signal to include all dreaming states
+                    if key == "dreaming" and value is None:
+                        include_dreaming = True
+                        continue
+                    
                     if isinstance(value, list):
-                        conditions.append(
+                        must_conditions.append(
                             FieldCondition(key=key, match=MatchAny(any=value))
                         )
-                    elif isinstance(value, dict) and "gte" in value or "lte" in value:
+                    elif isinstance(value, dict) and ("gte" in value or "lte" in value):
                         # Range filter
                         range_params = {}
                         if "gte" in value:
                             range_params["gte"] = value["gte"]
                         if "lte" in value:
                             range_params["lte"] = value["lte"]
-                        conditions.append(
+                        must_conditions.append(
                             FieldCondition(key=key, range=Range(**range_params))
                         )
                     else:
-                        conditions.append(
+                        must_conditions.append(
                             FieldCondition(key=key, match=MatchValue(value=value))
                         )
 
-                if conditions:
-                    filter_conditions = Filter(must=conditions)
+            # Default dreaming filter: exclude dreaming=true unless explicitly requested to include all
+            if not include_dreaming and (filters is None or "dreaming" not in filters):
+                must_not_conditions.append(
+                    FieldCondition(key="dreaming", match=MatchValue(value=True))
+                )
+
+            # Build filter object
+            filter_conditions = None
+            if must_conditions or must_not_conditions:
+                filter_conditions = Filter(
+                    must=must_conditions if must_conditions else None,
+                    must_not=must_not_conditions if must_not_conditions else None,
+                )
 
             # Perform search using updated API
             search_results = self.client.query_points(
@@ -557,6 +575,7 @@ class QdrantVectorStore(VectorStoreInterface):
         since: Optional[float] = None,
         project: Optional[str] = None,
         tag: Optional[str] = None,
+        dreaming: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """List memory documents with optional filtering.
 
@@ -566,6 +585,7 @@ class QdrantVectorStore(VectorStoreInterface):
             since: Unix timestamp - only include docs created after this time
             project: Filter by metadata.project value
             tag: Filter by tag value
+            dreaming: Filter by dreaming status (True=consolidated, False=active, None=all)
 
         Returns:
             List of memory documents with metadata, deduplicated by document_id
@@ -592,6 +612,12 @@ class QdrantVectorStore(VectorStoreInterface):
             if tag is not None:
                 must_conditions.append(
                     FieldCondition(key="tags", match=MatchValue(value=tag))
+                )
+
+            # Build filter with dreaming condition
+            if dreaming is not None:
+                must_conditions.append(
+                    FieldCondition(key="dreaming", match=MatchValue(value=dreaming))
                 )
 
             scroll_filter = Filter(must=must_conditions)
@@ -736,6 +762,79 @@ class QdrantVectorStore(VectorStoreInterface):
             logger.error(f"Failed to delete memory documents from Qdrant: {e}")
             raise
 
+    def update_memory_metadata(
+        self, document_id: str, payload_updates: Dict[str, Any]
+    ) -> int:
+        """Update metadata fields on a memory document without re-embedding.
+
+        Finds all chunks of the memory and updates specified payload fields.
+        Only updates fields present in payload_updates; others unchanged.
+
+        Args:
+            document_id: The memory document_id to update
+            payload_updates: Dict of fields to update (e.g., {"dreaming": True, "memory_type": "semantic"})
+
+        Returns:
+            Number of chunks updated
+
+        Example:
+            update_memory_metadata("memory_abc123", {"dreaming": True, "consolidation_version": 1})
+        """
+        if not self._initialized:
+            self.initialize()
+
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            # Find all chunks for this document_id
+            points_to_update = []
+            offset = None
+
+            while True:
+                points, new_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=100,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="document_id", match=MatchValue(value=document_id)
+                            )
+                        ]
+                    ),
+                    offset=offset,
+                )
+
+                if not points:
+                    break
+
+                points_to_update.extend([p.id for p in points])
+
+                offset = new_offset
+                if new_offset is None:
+                    break
+
+            if not points_to_update:
+                logger.warning(f"No chunks found for document_id: {document_id}")
+                return 0
+
+            # Update payload on all chunks
+            self.client.set_payload(
+                collection_name=self.collection_name,
+                points_selector=points_to_update,
+                payload=payload_updates,
+            )
+
+            logger.info(
+                f"Updated {len(points_to_update)} chunks for document_id {document_id}: {payload_updates}"
+            )
+            return len(points_to_update)
+
+        except Exception as e:
+            logger.error(f"Failed to update memory metadata in Qdrant: {e}")
+            raise
+
     def _ensure_collection_exists(self) -> None:
         """Ensure the collection exists in Qdrant."""
         try:
@@ -769,6 +868,8 @@ class QdrantVectorStore(VectorStoreInterface):
             "file_name": PayloadSchemaType.KEYWORD,
             "tags": PayloadSchemaType.KEYWORD,
             "project": PayloadSchemaType.KEYWORD,
+            "dreaming": PayloadSchemaType.BOOL,
+            "memory_type": PayloadSchemaType.KEYWORD,
         }
         for field_name, field_type in index_fields.items():
             try:

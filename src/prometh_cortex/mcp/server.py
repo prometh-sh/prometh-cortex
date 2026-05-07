@@ -172,6 +172,7 @@ async def prometh_cortex_query(
     filters: Optional[Dict[str, Any]] = None,
     show_query_info: bool = False,
     include_full_content: bool = False,
+    include_dreaming: bool = False,
 ) -> Dict[str, Any]:
     """Query indexed documents with enhanced tag-based filtering and semantic search.
 
@@ -193,6 +194,7 @@ async def prometh_cortex_query(
         filters: Optional additional filters (merged with parsed structured filters)
         show_query_info: Include query parsing information in response for debugging
         include_full_content: Load and include complete document content (not just chunks)
+        include_dreaming: When True, includes consolidated (dreaming=true) memories. By default, only active memories are returned.
 
     Returns:
         Dictionary containing query results, timing, metadata, and optionally full document content
@@ -231,6 +233,13 @@ async def prometh_cortex_query(
                 else:
                     # Direct metadata filters can be handled by vector store
                     vector_store_filters[key] = value
+
+        # Handle dreaming filter
+        # If include_dreaming=True, don't add the default dreaming filter (all dreaming states included)
+        # If include_dreaming=False (default), let query() apply the default dreaming=false filter
+        if include_dreaming and "dreaming" not in vector_store_filters:
+            # Explicitly set dreaming to None to signal: include all
+            vector_store_filters["dreaming"] = None
 
         # Perform query with optional source_type filtering
         results = indexer.query(
@@ -627,6 +636,211 @@ async def prometh_cortex_memory(
     except Exception as e:
         logger.critical(f"Memory document unexpected error: {e}")
         return {"error": f"Internal error: {e}"}
+
+
+@mcp.tool()
+async def prometh_cortex_memory_dream_prepare(project: str) -> Dict[str, Any]:
+    """Fetch episodic memories for consolidation.
+
+    Retrieves all active (dreaming=false) episodic memories for a project
+    and any prior semantic memories. Used as the first step in the
+    consolidation workflow: prepare → (LLM synthesis) → commit.
+
+    Args:
+        project: Project name to consolidate memories for (required)
+
+    Returns:
+        Dictionary with:
+        - status: "success" or error message
+        - to_consolidate: List of episodic memories (dreaming=false, memory_type=episodic)
+        - prior_semantic: List of prior semantic memories (memory_type=semantic, used as context)
+        - total_memories: Count of memories returned
+    """
+    try:
+        indexer = await lazy_load_index()
+        if not indexer:
+            return {"error": "Indexer not initialized"}
+
+        # Fetch active episodic memories (candidates for consolidation)
+        episodic_memories = indexer.list_memories(
+            project=project, dreaming=False
+        )
+        episodic_memories = [
+            m for m in episodic_memories if m.get("memory_type") == "episodic"
+        ]
+
+        # Fetch prior semantic memories (to include as context, will be superseded)
+        prior_semantic = indexer.list_memories(project=project, dreaming=False)
+        prior_semantic = [
+            m for m in prior_semantic if m.get("memory_type") == "semantic"
+        ]
+
+        logger.info(
+            f"Dream prepare: {len(episodic_memories)} episodic + {len(prior_semantic)} prior semantic for project {project}"
+        )
+
+        return {
+            "status": "success",
+            "project": project,
+            "to_consolidate": episodic_memories,
+            "prior_semantic": prior_semantic,
+            "total_memories": len(episodic_memories) + len(prior_semantic),
+        }
+
+    except Exception as e:
+        logger.error(f"Dream prepare failed: {e}")
+        return {"error": f"Failed to prepare memories: {e}"}
+
+
+@mcp.tool()
+async def prometh_cortex_memory_dream_commit(
+    project: str,
+    consolidated_content: str,
+    consolidated_title: str,
+    source_memory_ids: List[str],
+    supersede_memory_ids: Optional[List[str]] = None,
+    consolidation_version: int = 1,
+) -> Dict[str, Any]:
+    """Commit consolidated memory after LLM synthesis.
+
+    Stores the new consolidated semantic memory and marks source memories
+    as dreaming=true (consolidated-away). Optionally supersedes prior
+    semantic memories if provided.
+
+    Args:
+        project: Project name
+        consolidated_content: Full consolidated memory content (markdown)
+        consolidated_title: Title for the consolidated memory
+        source_memory_ids: List of episodic document_ids consumed in consolidation
+        supersede_memory_ids: Optional list of prior semantic memory_ids being replaced
+        consolidation_version: Version number for this consolidation run (default: 1)
+
+    Returns:
+        Dictionary with:
+        - status: "success" or error message
+        - consolidated_id: document_id of new consolidated memory
+        - marked_dreaming: Count of memories marked dreaming=true
+        - superseded: Count of prior semantics superseded
+    """
+    try:
+        indexer = await lazy_load_index()
+        if not indexer:
+            return {"error": "Indexer not initialized"}
+
+        supersede_memory_ids = supersede_memory_ids or []
+        all_source_ids = source_memory_ids + supersede_memory_ids
+
+        # Mark all source + superseded memories as dreaming=true
+        for mem_id in all_source_ids:
+            try:
+                indexer.update_memory_metadata(
+                    mem_id, {"dreaming": True, "consolidation_version": consolidation_version}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to mark {mem_id} as dreaming: {e}")
+
+        # Store new consolidated memory
+        result = indexer.add_memory_document(
+            title=consolidated_title,
+            content=consolidated_content,
+            tags=["consolidated", f"v{consolidation_version}"],
+            metadata={
+                "project": project,
+                "memory_type": "semantic",
+                "dreaming": False,
+                "consolidation_version": consolidation_version,
+                "source_memories": source_memory_ids,
+                "supersedes": supersede_memory_ids,
+            },
+        )
+
+        if result.get("status") != "success":
+            return {"error": f"Failed to store consolidated memory: {result}"}
+
+        logger.info(
+            f"Dream commit: new semantic {result['document_id']} consolidates {len(all_source_ids)} memories"
+        )
+
+        return {
+            "status": "success",
+            "consolidated_id": result["document_id"],
+            "marked_dreaming": len(all_source_ids),
+            "superseded": len(supersede_memory_ids),
+            "consolidation_version": consolidation_version,
+        }
+
+    except Exception as e:
+        logger.error(f"Dream commit failed: {e}")
+        return {"error": f"Failed to commit consolidated memory: {e}"}
+
+
+@mcp.tool()
+async def prometh_cortex_memory_dream_revert(
+    consolidation_id: str, delete_consolidated: bool = True
+) -> Dict[str, Any]:
+    """Revert a consolidation (mark source memories as active again).
+
+    Restores source and superseded memories to dreaming=false,
+    optionally deleting the consolidated semantic memory.
+
+    Args:
+        consolidation_id: document_id of the consolidated (semantic) memory to revert
+        delete_consolidated: Whether to delete the consolidated memory (default: True)
+
+    Returns:
+        Dictionary with:
+        - status: "success" or error message
+        - restored_memories: Count of memories restored to active
+        - deleted_consolidated: Whether consolidated memory was deleted
+    """
+    try:
+        indexer = await lazy_load_index()
+        if not indexer:
+            return {"error": "Indexer not initialized"}
+
+        # Fetch the consolidated memory to get source/superseded IDs
+        consolidated_mem = indexer.list_memories()  # Fetch all, will filter
+        consolidated_mem = [
+            m for m in consolidated_mem if m.get("document_id") == consolidation_id
+        ]
+
+        if not consolidated_mem:
+            return {"error": f"Consolidated memory not found: {consolidation_id}"}
+
+        consolidated_mem = consolidated_mem[0]
+        source_ids = consolidated_mem.get("source_memories", [])
+        supersede_ids = consolidated_mem.get("supersedes", [])
+        all_to_restore = source_ids + supersede_ids
+
+        # Restore all source + superseded memories to dreaming=false
+        restored_count = 0
+        for mem_id in all_to_restore:
+            try:
+                indexer.update_memory_metadata(mem_id, {"dreaming": False})
+                restored_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to restore {mem_id}: {e}")
+
+        # Delete consolidated memory if requested
+        if delete_consolidated:
+            try:
+                indexer.delete_memories([consolidation_id])
+            except Exception as e:
+                logger.warning(f"Failed to delete consolidated memory {consolidation_id}: {e}")
+
+        logger.info(
+            f"Dream revert: restored {restored_count} memories, deleted={delete_consolidated}"
+        )
+
+        return {
+            "status": "success",
+            "restored_memories": restored_count,
+            "deleted_consolidated": delete_consolidated,
+        }
+
+    except Exception as e:
+        logger.error(f"Dream revert failed: {e}")
+        return {"error": f"Failed to revert consolidation: {e}"}
 
 
 def run_mcp_server(transport: str = "stdio", host: str = "127.0.0.1", port: int = 3100):

@@ -645,6 +645,8 @@ class DocumentIndexer:
                 "author": "prometh_cortex_memory",
                 "source_type": "prmth_memory",
                 "document_id": document_id,
+                "dreaming": False,
+                "memory_type": "episodic",
             }
 
             # Merge with caller-provided metadata
@@ -715,6 +717,7 @@ class DocumentIndexer:
         since: Optional[float] = None,
         project: Optional[str] = None,
         tag: Optional[str] = None,
+        dreaming: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """List memory documents with optional filtering.
 
@@ -722,17 +725,47 @@ class DocumentIndexer:
             since: Unix timestamp - only include docs created after this time
             project: Filter by metadata.project value
             tag: Filter by tag value
+            dreaming: Filter by dreaming status (True=consolidated, False=active, None=all)
 
         Returns:
             List of memory documents sorted by creation date (newest first)
         """
         try:
             return self.vector_store.list_memory_documents(
-                since=since, project=project, tag=tag
+                since=since, project=project, tag=tag, dreaming=dreaming
             )
         except Exception as e:
             logger.error(f"Failed to list memory documents: {e}")
             return []
+
+    def update_memory_metadata(
+        self, document_id: str, payload_updates: Dict[str, Any]
+    ) -> int:
+        """Update metadata fields on a memory document.
+
+        Args:
+            document_id: The memory document_id to update
+            payload_updates: Dict of fields to update (e.g., {"dreaming": True, "memory_type": "semantic"})
+
+        Returns:
+            Number of chunks updated
+
+        Raises:
+            IndexerError: If update fails
+        """
+        if not self.vector_store:
+            raise IndexerError("Vector store not initialized")
+
+        try:
+            updated_count = self.vector_store.update_memory_metadata(
+                document_id, payload_updates
+            )
+            logger.info(
+                f"Updated {updated_count} chunks for memory {document_id}: {payload_updates}"
+            )
+            return updated_count
+        except Exception as e:
+            raise IndexerError(f"Failed to update memory metadata: {e}")
 
     def delete_memories(self, document_ids: List[str]) -> int:
         """Delete specific memory documents by their document_ids.

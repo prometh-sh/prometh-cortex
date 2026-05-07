@@ -622,3 +622,262 @@ class TestMemoryForgetExpirySemantics:
             assert result.exit_code == 0
             assert "Cancelled" in result.output
             mock_vs.delete_memory_documents.assert_not_called()
+
+
+class TestMemoryDreamCommand:
+    """Tests for memory dream command (consolidation workflow)."""
+
+    def test_memory_dream_requires_project(self):
+        """Test that memory dream requires --project flag."""
+        runner = CliRunner()
+        mock_config = Mock()
+        result = runner.invoke(memory, ["dream"], obj={"config": mock_config, "verbose": False})
+        assert result.exit_code != 0
+        assert "Missing option" in result.output or "Error" in result.output
+
+    def test_memory_dream_prepare_no_memories(self):
+        """Test prepare mode with no memories to consolidate."""
+        runner = CliRunner()
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.list_memories.return_value = []
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
+            )
+            assert result.exit_code == 0
+            assert "No memories found for consolidation" in result.output
+
+    def test_memory_dream_prepare_with_episodic_memories(self):
+        """Test prepare mode showing episodic memories for consolidation."""
+        runner = CliRunner()
+
+        episodic_memories = [
+            {
+                "document_id": "memory_ep1",
+                "title": "Event 1",
+                "created": "2026-05-01T10:00:00Z",
+                "memory_type": "episodic",
+                "dreaming": False,
+            },
+            {
+                "document_id": "memory_ep2",
+                "title": "Event 2",
+                "created": "2026-05-02T15:30:00Z",
+                "memory_type": "episodic",
+                "dreaming": False,
+            },
+        ]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.list_memories.return_value = episodic_memories
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
+            )
+            assert result.exit_code == 0
+            assert "Dream Prepare" in result.output
+            assert "Event 1" in result.output
+            assert "Event 2" in result.output
+            assert "Next steps" in result.output
+
+    def test_memory_dream_prepare_with_prior_semantic(self):
+        """Test prepare mode showing prior semantic memories."""
+        runner = CliRunner()
+
+        all_memories = [
+            {
+                "document_id": "memory_ep1",
+                "title": "Event",
+                "created": "2026-05-01T10:00:00Z",
+                "memory_type": "episodic",
+                "dreaming": False,
+            },
+            {
+                "document_id": "memory_sem1",
+                "title": "Previous Summary",
+                "created": "2026-04-20T09:00:00Z",
+                "memory_type": "semantic",
+                "dreaming": False,
+            },
+        ]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.list_memories.return_value = all_memories
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory, ["dream", "--project", "myproject"], obj={"config": mock_config, "verbose": False}
+            )
+            assert result.exit_code == 0
+            assert "Dream Prepare" in result.output
+            assert "Event" in result.output
+            assert "Previous Summary" in result.output
+
+    def test_memory_dream_revert_consolidation_not_found(self):
+        """Test revert with non-existent consolidation ID."""
+        runner = CliRunner()
+
+        mock_store = MagicMock()
+        mock_store.initialize.return_value = None
+        mock_store.list_memory_documents.return_value = []
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+             patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory,
+                ["dream", "--project", "myproject", "--revert", "nonexistent_id"],
+                obj={"config": mock_config, "verbose": False},
+            )
+            assert result.exit_code == 1
+            assert "Consolidated memory not found" in result.output
+
+    def test_memory_dream_revert_with_confirmation(self):
+        """Test revert mode with user confirmation."""
+        runner = CliRunner()
+
+        consolidated_memory = {
+            "document_id": "memory_cons1",
+            "title": "Consolidated Summary",
+            "created": "2026-05-01T12:00:00Z",
+            "source_memories": ["memory_ep1", "memory_ep2"],
+            "supersedes": ["memory_sem1"],
+            "dreaming": True,
+        }
+
+        mock_store = MagicMock()
+        mock_store.initialize.return_value = None
+        mock_store.list_memory_documents.return_value = [consolidated_memory]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.update_memory_metadata.return_value = None
+        mock_indexer.delete_memories.return_value = None
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+             patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory,
+                ["dream", "--project", "myproject", "--revert", "memory_cons1"],
+                input="y\n",
+                obj={"config": mock_config, "verbose": False},
+            )
+            assert result.exit_code == 0
+            assert "Revert Preview" in result.output
+            assert "2 source episodic" in result.output
+            assert "1 superseded semantic" in result.output
+            assert "Revert successful" in result.output
+            mock_indexer.update_memory_metadata.assert_called()
+
+    def test_memory_dream_revert_with_keep_consolidated(self):
+        """Test revert with --keep-consolidated flag."""
+        runner = CliRunner()
+
+        consolidated_memory = {
+            "document_id": "memory_cons1",
+            "title": "Consolidated Summary",
+            "created": "2026-05-01T12:00:00Z",
+            "source_memories": ["memory_ep1", "memory_ep2"],
+            "supersedes": [],
+            "dreaming": True,
+        }
+
+        mock_store = MagicMock()
+        mock_store.initialize.return_value = None
+        mock_store.list_memory_documents.return_value = [consolidated_memory]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.update_memory_metadata.return_value = None
+        mock_indexer.delete_memories.return_value = None
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+             patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory,
+                ["dream", "--project", "myproject", "--revert", "memory_cons1", "--keep-consolidated", "--confirm"],
+                obj={"config": mock_config, "verbose": False},
+            )
+            assert result.exit_code == 0
+            assert "Revert successful" in result.output
+            assert "kept" in result.output.lower()
+            # Should NOT call delete_memories when --keep-consolidated is set
+            mock_indexer.delete_memories.assert_not_called()
+
+    def test_memory_dream_revert_cancellation(self):
+        """Test revert cancellation when user declines."""
+        runner = CliRunner()
+
+        consolidated_memory = {
+            "document_id": "memory_cons1",
+            "title": "Consolidated Summary",
+            "source_memories": ["memory_ep1"],
+            "supersedes": [],
+        }
+
+        mock_store = MagicMock()
+        mock_store.initialize.return_value = None
+        mock_store.list_memory_documents.return_value = [consolidated_memory]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+             patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory,
+                ["dream", "--project", "myproject", "--revert", "memory_cons1"],
+                input="n\n",
+                obj={"config": mock_config, "verbose": False},
+            )
+            assert result.exit_code == 0
+            assert "Cancelled" in result.output
+            mock_indexer.update_memory_metadata.assert_not_called()
+
+    def test_memory_dream_revert_with_confirm_flag(self):
+        """Test revert with --confirm flag skips confirmation prompt."""
+        runner = CliRunner()
+
+        consolidated_memory = {
+            "document_id": "memory_cons1",
+            "title": "Consolidated Summary",
+            "source_memories": ["memory_ep1"],
+            "supersedes": [],
+        }
+
+        mock_store = MagicMock()
+        mock_store.initialize.return_value = None
+        mock_store.list_memory_documents.return_value = [consolidated_memory]
+
+        mock_indexer = MagicMock()
+        mock_indexer.initialize.return_value = None
+        mock_indexer.update_memory_metadata.return_value = None
+        mock_indexer.delete_memories.return_value = None
+
+        with patch("prometh_cortex.indexer.DocumentIndexer", return_value=mock_indexer), \
+             patch("prometh_cortex.cli.commands.memory.create_vector_store", return_value=mock_store):
+            mock_config = Mock()
+            result = runner.invoke(
+                memory,
+                ["dream", "--project", "myproject", "--revert", "memory_cons1", "--confirm"],
+                obj={"config": mock_config, "verbose": False},
+            )
+            assert result.exit_code == 0
+            assert "Revert successful" in result.output
+            mock_indexer.update_memory_metadata.assert_called()
+            mock_indexer.delete_memories.assert_called_once()
