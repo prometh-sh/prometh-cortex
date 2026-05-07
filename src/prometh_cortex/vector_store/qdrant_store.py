@@ -602,6 +602,7 @@ class QdrantVectorStore(VectorStoreInterface):
             must_conditions = [
                 FieldCondition(key="source_type", match=MatchValue(value="prmth_memory"))
             ]
+            must_not_conditions = []
 
             # Add optional conditions
             if project is not None:
@@ -615,12 +616,22 @@ class QdrantVectorStore(VectorStoreInterface):
                 )
 
             # Build filter with dreaming condition
-            if dreaming is not None:
+            # Use must_not[dreaming=true] for False to include memories without the field
+            if dreaming is True:
                 must_conditions.append(
-                    FieldCondition(key="dreaming", match=MatchValue(value=dreaming))
+                    FieldCondition(key="dreaming", match=MatchValue(value=True))
                 )
+            elif dreaming is False:
+                must_not_conditions.append(
+                    FieldCondition(key="dreaming", match=MatchValue(value=True))
+                )
+            # If dreaming is None, include all (no filter)
 
-            scroll_filter = Filter(must=must_conditions)
+            filter_kwargs = {"must": must_conditions}
+            if must_not_conditions:
+                filter_kwargs["must_not"] = must_not_conditions
+
+            scroll_filter = Filter(**filter_kwargs)
 
             # Scroll with filter
             # new_offset=None means last page (all results fit or end reached)

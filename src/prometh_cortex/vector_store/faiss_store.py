@@ -538,9 +538,14 @@ class FAISSVectorStore(VectorStoreInterface):
                     continue
 
             # Apply dreaming filter
-            if dreaming is not None:
-                if metadata.get("dreaming") != dreaming:
+            # When dreaming=False, exclude dreaming=true (include memories without field)
+            if dreaming is True:
+                if metadata.get("dreaming") != True:
                     continue
+            elif dreaming is False:
+                if metadata.get("dreaming") == True:
+                    continue
+            # If dreaming is None, include all
 
             # Add to results (deduplicated)
             docs_by_id[base_doc_id] = metadata
