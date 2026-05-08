@@ -700,6 +700,7 @@ async def prometh_cortex_memory_dream_commit(
     source_memory_ids: List[str],
     supersede_memory_ids: Optional[List[str]] = None,
     consolidation_version: int = 1,
+    tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Commit consolidated memory after LLM synthesis.
 
@@ -714,6 +715,7 @@ async def prometh_cortex_memory_dream_commit(
         source_memory_ids: List of episodic document_ids consumed in consolidation
         supersede_memory_ids: Optional list of prior semantic memory_ids being replaced
         consolidation_version: Version number for this consolidation run (default: 1)
+        tags: Optional list of tags to preserve from source memories (default: ["consolidated", f"v{consolidation_version}"])
 
     Returns:
         Dictionary with:
@@ -739,11 +741,18 @@ async def prometh_cortex_memory_dream_commit(
             except Exception as e:
                 logger.warning(f"Failed to mark {mem_id} as dreaming: {e}")
 
+        # Build tags: preserve passed tags + add consolidation markers
+        consolidated_tags = tags or []
+        if "consolidated" not in consolidated_tags:
+            consolidated_tags.append("consolidated")
+        if f"v{consolidation_version}" not in consolidated_tags:
+            consolidated_tags.append(f"v{consolidation_version}")
+
         # Store new consolidated memory
         result = indexer.add_memory_document(
             title=consolidated_title,
             content=consolidated_content,
-            tags=["consolidated", f"v{consolidation_version}"],
+            tags=consolidated_tags,
             metadata={
                 "project": project,
                 "memory_type": "semantic",
